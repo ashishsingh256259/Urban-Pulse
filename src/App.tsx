@@ -151,7 +151,6 @@ export default function App() {
 
   const [loadingReports, setLoadingReports] = useState(true);
   const [appOnline, setAppOnline] = useState(true);
-  const [quotaExceeded, setQuotaExceeded] = useState(false);
   
   // Sovereign Multi-City ready states
   const [selectedCityName, setSelectedCityName] = useState("New Delhi (NCR)");
@@ -269,38 +268,31 @@ export default function App() {
   useEffect(() => {
     if (!currentUser) return;
     setLoadingReports(true);
-    const unsubReports = subscribeToReports(
-      (fetchedReports) => {
-        if (!initialReportsLoadedRef.current) {
-          initialReportsLoadedRef.current = true;
-          fetchedReports.forEach(r => knownReportIdsRef.current.add(r.id));
-        } else {
-          // Detect newly arrived report while user is on dashboard
-          const newlyArrived = fetchedReports.find(r => !knownReportIdsRef.current.has(r.id));
-          if (newlyArrived) {
-            knownReportIdsRef.current.add(newlyArrived.id);
-            if (currentUser?.role === "admin" || currentUser?.role === "municipal") {
-              setNewReportToast({
-                id: newlyArrived.id,
-                title: newlyArrived.title || "Citizen Issue Reported",
-                category: newlyArrived.category || "General",
-                location: newlyArrived.location || "City Location",
-                severity: newlyArrived.severity
-              });
-            }
+    const unsubReports = subscribeToReports((fetchedReports) => {
+      if (!initialReportsLoadedRef.current) {
+        initialReportsLoadedRef.current = true;
+        fetchedReports.forEach(r => knownReportIdsRef.current.add(r.id));
+      } else {
+        // Detect newly arrived report while user is on dashboard
+        const newlyArrived = fetchedReports.find(r => !knownReportIdsRef.current.has(r.id));
+        if (newlyArrived) {
+          knownReportIdsRef.current.add(newlyArrived.id);
+          if (currentUser?.role === "admin" || currentUser?.role === "municipal") {
+            setNewReportToast({
+              id: newlyArrived.id,
+              title: newlyArrived.title || "Citizen Issue Reported",
+              category: newlyArrived.category || "General",
+              location: newlyArrived.location || "City Location",
+              severity: newlyArrived.severity
+            });
           }
-          fetchedReports.forEach(r => knownReportIdsRef.current.add(r.id));
         }
-
-        setReports(fetchedReports);
-        setLoadingReports(false);
-      },
-      (err) => {
-        if (err?.message?.includes("Quota") || String(err).includes("Quota")) {
-          setQuotaExceeded(true);
-        }
+        fetchedReports.forEach(r => knownReportIdsRef.current.add(r.id));
       }
-    );
+
+      setReports(fetchedReports);
+      setLoadingReports(false);
+    });
     const unsubNotifs = subscribeToNotifications(currentUser.email, currentUser.role as any, (fetchedNotifs) => {
       setNotifications(fetchedNotifs);
     });
@@ -811,26 +803,6 @@ export default function App() {
       {currentUser ? (
         <div className="flex-1 flex flex-col min-h-screen md:pl-72 bg-[#F5F7FB]">
           
-          {/* FIRESTORE QUOTA EXCEEDED NOTICE BANNER */}
-          {quotaExceeded && (
-            <div className="bg-amber-500/10 border-b border-amber-500/30 px-4 py-2.5 text-xs text-amber-900 dark:text-amber-200 flex flex-wrap items-center justify-between gap-2 z-[1010]">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-                <span>
-                  <strong>Firestore Quota Limit Exceeded:</strong> Daily free tier read quota reached for database <code className="bg-amber-500/20 px-1 py-0.5 rounded font-mono text-[11px]">ai-studio-385a0043-8c1d-4479-a82c-ad6de680ca0b</code>. Operating on resilient cached state.
-                </span>
-              </div>
-              <a 
-                href="https://console.firebase.google.com/project/jaunty-cooler-2fcvx/firestore/databases/ai-studio-385a0043-8c1d-4479-a82c-ad6de680ca0b/data?openUpgradeDialog=true"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-bold underline text-amber-700 dark:text-amber-300 hover:text-amber-900 shrink-0"
-              >
-                Reset / Upgrade Quota in Firebase Console &rarr;
-              </a>
-            </div>
-          )}
-
           {/* TOP HORIZONTAL COMMAND HEADER (Desktop & Mobile) */}
           <header className="bg-white/95 backdrop-blur-md border-b border-[#E2E8F0] px-4 sm:px-6 py-2.5 sticky top-0 z-[1000] flex items-center justify-between gap-4 shadow-2xs">
             {/* Mobile Hamburger & Logo */}

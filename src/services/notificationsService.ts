@@ -2,6 +2,7 @@ import { handleFirestoreError, OperationType } from "../lib/firestore_errors";
 import { setDoc, collection, query, where, onSnapshot, doc, updateDoc, writeBatch, limit } from "firebase/firestore";
 import { db, stripUndefinedDeep } from "../lib/firebase";
 import { Notification } from "../types";
+import { getDemoNotifications } from "./demoDataService";
 
 const parseIsoDate = (raw: any): string => {
   if (!raw) return new Date().toISOString();
@@ -98,6 +99,7 @@ export function subscribeToNotifications(
     handleFirestoreError(error, OperationType.LIST, "notifications");
 
     // Resilient Fallback: Fetch notifications from REST API if Firestore quota/network error occurs
+    let apiSuccess = false;
     try {
       const resp = await fetch(`/api/notifications?email=${encodeURIComponent(userEmail)}&role=${encodeURIComponent(userRole)}`);
       if (resp.ok) {
@@ -109,10 +111,15 @@ export function subscribeToNotifications(
           }));
           parsed.sort((a: Notification, b: Notification) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
           callback(parsed);
+          apiSuccess = true;
         }
       }
     } catch (apiErr) {
       console.warn("[Notifications] API fallback notice:", apiErr);
+    }
+
+    if (!apiSuccess) {
+      callback(getDemoNotifications(userEmail, userRole));
     }
   });
 

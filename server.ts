@@ -310,29 +310,37 @@ async function bootstrapFirestoreSeeds() {
 // SECURE GEMINI AI INITIALIZATION
 // ===================================================
 
-const apiKey = process.env.GEMINI_API_KEY;
 let ai: GoogleGenAI | null = null;
 
-if (apiKey && apiKey !== "YOUR_GEMINI_API_KEY" && apiKey.trim().length > 0) {
-  try {
-    ai = new GoogleGenAI({ 
-      apiKey,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        }
-      }
-    });
-    console.log("[Gemini AI] Sovereign AI Engine successfully initialized on server.");
-  } catch (err) {
-    console.warn("[Gemini AI] Initialization warning:", err);
+function getGeminiClient(): GoogleGenAI | null {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey || apiKey === "YOUR_GEMINI_API_KEY" || apiKey.trim().length === 0) {
+    return null;
   }
-} else {
-  console.log("[Gemini AI] No valid GEMINI_API_KEY in environment. Heuristic fallback mode active.");
+  if (!ai) {
+    try {
+      ai = new GoogleGenAI({ 
+        apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
+      console.log("[Gemini AI] Sovereign AI Engine successfully initialized on server.");
+    } catch (err) {
+      console.warn("[Gemini AI] Initialization warning:", err);
+      return null;
+    }
+  }
+  return ai;
 }
 
-// Authoritative Road Scanner Gemini Model & Batching Configuration
-const ROAD_SCANNER_GEMINI_MODEL = process.env.ROAD_SCANNER_GEMINI_MODEL || "gemini-3.8-flash";
+// Initial attempt to bind client
+getGeminiClient();
+
+// Authoritative Road Scanner & Guardian AI Gemini Model Configuration
+const ROAD_SCANNER_GEMINI_MODEL = process.env.ROAD_SCANNER_GEMINI_MODEL || "gemini-3.1-flash-lite";
 const GEMINI_FRAME_BATCH_SIZE = 4;
 const MAX_GEMINI_REQUESTS_PER_SCAN = 3;
 
@@ -394,7 +402,7 @@ async function generateContentWithFallback(
   params: any,
   preferredModel: string = ROAD_SCANNER_GEMINI_MODEL
 ): Promise<{ response: any; modelUsed: string }> {
-  // Use authoritative primary model first, followed by valid high-efficiency modern models
+  // Authoritative models ordered by speed, capability, and availability: gemini-3.1-flash-lite -> gemini-flash-latest -> gemini-3.8-flash
   const candidateModels = Array.from(new Set([preferredModel, "gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.8-flash"]));
   const availableModels = candidateModels.filter(m => !isModelInCooldown(m));
   const models = availableModels.length > 0 ? availableModels : candidateModels.slice(0, 1);
@@ -402,11 +410,12 @@ async function generateContentWithFallback(
 
   for (const model of models) {
     try {
-      const reqPayload = JSON.parse(JSON.stringify(params));
-      reqPayload.model = model;
-
+      const reqPayload = { ...params, model };
+      console.log(`[Diagnostic] Gemini request started with model: ${model}`);
+      const startMs = Date.now();
       const response = await aiClient.models.generateContent(reqPayload);
       if (response) {
+        console.log(`[Diagnostic] Gemini response received from ${model} in ${Date.now() - startMs}ms`);
         return { response, modelUsed: model };
       }
     } catch (err: any) {
@@ -420,14 +429,14 @@ async function generateContentWithFallback(
       
       if (isRateLimit) {
         setModelCooldown(model, 60000);
-        console.log(`[Gemini AI] Model ${model} free-tier rate limit/quota reached. Cooling down 60s, switching to next fallback.`);
+        console.log(`[Gemini AI] Model ${model} rate limit/quota reached. Cooling down 60s, switching to next model.`);
       } else {
-        console.log(`[Gemini AI] Model ${model} unavailable: ${errMsg.slice(0, 80)}`);
+        console.log(`[Gemini AI] Model ${model} error: ${errMsg.slice(0, 120)}`);
       }
     }
   }
 
-  throw lastError || new Error("All Gemini model fallback attempts exhausted.");
+  throw lastError || new Error("All Gemini model attempts exhausted.");
 }
 
 // ===================================================
@@ -624,7 +633,7 @@ const handleCreateReport = async (req: Request, res: Response) => {
       return res.status(400).json({ error: "Report title is required." });
     }
 
-    const reportId = `REP-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`;
+    const reportId = req.body.id || `REP-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`;
     const nowStr = new Date().toISOString();
 
     const lat = typeof latitude === "number" && !isNaN(latitude) ? latitude : null;
@@ -1089,11 +1098,16 @@ app.post("/api/ai/analyze-image", async (req: Request, res: Response) => {
   try {
     const { image, title, description, category, location } = req.body;
 
+    console.log(`[Diagnostic] /api/ai/analyze-image request received: title="${title || "N/A"}", category="${category || "N/A"}", location="${location || "N/A"}"`);
+
     if (!image) {
+      console.warn("[Diagnostic] AI image analysis rejected: No image payload provided.");
       return res.status(400).json({ error: "No image payload provided for AI analysis." });
     }
 
-    if (ai) {
+    const aiClient = getGeminiClient();
+
+    if (aiClient) {
       try {
         const contentsPayload: any[] = [];
         const systemPrompt = `You are the UrbanPulse Guardian AI Infrastructure Analysis Engine.
@@ -1104,35 +1118,87 @@ If the image shows no hazard (e.g. selfie, pet, indoor room, food, document, mem
 Respond ONLY with valid JSON matching:
 {
   "issueDetected": boolean,
+  "detectedIssue": boolean,
   "issueType": "Pothole" | "Garbage Overflow" | "Broken Streetlight" | "Road Obstruction" | "Vandals / Graffiti" | "Other",
+  "category": "Pothole" | "Garbage Overflow" | "Broken Streetlight" | "Road Obstruction" | "Vandals / Graffiti" | "Other",
   "confidence": integer (0 to 100),
   "severity": integer (0 to 100),
   "priority": "Low" | "Medium" | "High" | "Critical",
   "riskLevel": "Low" | "Medium" | "High",
   "description": string (2-3 sentences),
+  "explanation": string (2-3 sentences),
   "recommendedActions": array of strings (top 3 actions for city crews),
+  "recommendedAction": string (primary immediate action),
   "reasoning": string (1-2 sentences)
 }`;
 
+        // 1. Process Image Payload (Data URL, Remote URL, or Raw Base64)
         if (typeof image === "string" && image.startsWith("data:")) {
-          const mimePattern = /^data:(image\/[a-zA-Z+]+);base64,/;
+          const mimePattern = /^data:(image\/[a-zA-Z0-9+.-]+);base64,/;
           const match = image.match(mimePattern);
-          const mimeType = match ? match[1] : "image/jpeg";
+          let mimeType = match ? match[1] : "image/jpeg";
+          if (mimeType === "image/jpg") mimeType = "image/jpeg";
           const base64Data = image.replace(mimePattern, "");
+          const byteLength = Math.round((base64Data.length * 3) / 4);
+
+          console.log(`[Diagnostic] Image source: DATA_URL, MIME: ${mimeType}, Size: ~${byteLength} bytes`);
 
           contentsPayload.push({
             inlineData: { mimeType, data: base64Data }
           });
           contentsPayload.push({
-            text: `Analyze uploaded image. Title hint: "${title || ""}". Description: "${description || ""}". Location: "${location || ""}".`
+            text: `Analyze this uploaded urban scene photo. Report title: "${title || ""}". Description: "${description || ""}". Location: "${location || ""}". Stated Category: "${category || ""}".`
+          });
+        } else if (typeof image === "string" && (image.startsWith("http://") || image.startsWith("https://"))) {
+          console.log(`[Diagnostic] Image source: REMOTE_HTTPS_URL (${image.slice(0, 60)}...)`);
+          try {
+            const fetchResp = await fetch(image);
+            console.log(`[Diagnostic] Remote image fetch status: ${fetchResp.status}, Content-Type: ${fetchResp.headers.get("content-type")}`);
+            if (fetchResp.ok) {
+              const arrayBuf = await fetchResp.arrayBuffer();
+              const buffer = Buffer.from(arrayBuf);
+              let mimeType = fetchResp.headers.get("content-type") || "image/jpeg";
+              if (mimeType.includes("image/png")) mimeType = "image/png";
+              else if (mimeType.includes("image/webp")) mimeType = "image/webp";
+              else mimeType = "image/jpeg";
+
+              console.log(`[Diagnostic] Remote image converted to base64, buffer size: ${buffer.length} bytes, MIME: ${mimeType}`);
+
+              contentsPayload.push({
+                inlineData: { mimeType, data: buffer.toString("base64") }
+              });
+              contentsPayload.push({
+                text: `Analyze this uploaded urban scene photo. Report title: "${title || ""}". Description: "${description || ""}". Location: "${location || ""}". Stated Category: "${category || ""}".`
+              });
+            } else {
+              console.warn(`[Diagnostic] Remote image fetch returned non-200 HTTP status: ${fetchResp.status}`);
+              contentsPayload.push({
+                text: `Analyze reported urban incident. Title: "${title || ""}". Description: "${description || ""}". Category: "${category || "Pothole"}". Location: "${location || ""}".`
+              });
+            }
+          } catch (fetchErr: any) {
+            console.warn("[Diagnostic] Remote image fetch error:", fetchErr?.message || fetchErr);
+            contentsPayload.push({
+              text: `Analyze reported urban incident. Title: "${title || ""}". Description: "${description || ""}". Category: "${category || "Pothole"}". Location: "${location || ""}".`
+            });
+          }
+        } else if (typeof image === "string" && image.length > 100) {
+          const byteLength = Math.round((image.length * 3) / 4);
+          console.log(`[Diagnostic] Image source: RAW_BASE64, Size: ~${byteLength} bytes`);
+          contentsPayload.push({
+            inlineData: { mimeType: "image/jpeg", data: image }
+          });
+          contentsPayload.push({
+            text: `Analyze this uploaded urban scene photo. Report title: "${title || ""}". Description: "${description || ""}". Location: "${location || ""}". Stated Category: "${category || ""}".`
           });
         } else {
+          console.log("[Diagnostic] Image source: CONTEXT_ONLY (No image bytes)");
           contentsPayload.push({
-            text: `Context evaluation: Title: "${title || ""}". Description: "${description || ""}". Category: "${category || "Pothole"}".`
+            text: `Context evaluation: Title: "${title || ""}". Description: "${description || ""}". Category: "${category || "Pothole"}". Location: "${location || ""}".`
           });
         }
 
-        const { response } = await generateContentWithFallback(ai, {
+        const { response, modelUsed } = await generateContentWithFallback(aiClient, {
           contents: contentsPayload,
           config: {
             systemInstruction: systemPrompt,
@@ -1140,27 +1206,56 @@ Respond ONLY with valid JSON matching:
           }
         });
 
-        const rawText = response.text || "{}";
-        const cleaned = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
-        const parsed = JSON.parse(cleaned);
+        let rawText = response.text || "";
+        if (!rawText && response.candidates && response.candidates[0]?.content?.parts) {
+          rawText = response.candidates[0].content.parts.map((p: any) => p.text || "").join("");
+        }
+
+        const cleaned = rawText.replace(/```(?:json)?\s*([\s\S]*?)\s*```/g, "$1").trim();
+        let parsed: any = {};
+        try {
+          parsed = JSON.parse(cleaned);
+        } catch (pErr) {
+          const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            parsed = JSON.parse(jsonMatch[0]);
+          } else {
+            throw new Error("Could not parse JSON output from Gemini response.");
+          }
+        }
+
+        const detectedIssue = parsed.issueDetected !== undefined ? Boolean(parsed.issueDetected) : (parsed.detectedIssue !== undefined ? Boolean(parsed.detectedIssue) : true);
+        const resolvedCategory = parsed.issueType || parsed.category || category || "Pothole";
+        const severityScore = Number(parsed.severity ?? parsed.severityScore) || 60;
+        const confidenceVal = Number(parsed.confidence) || 88;
+        const descText = parsed.description || parsed.explanation || "Identified urban infrastructure hazard requiring municipal remediation.";
+        const actionsList = Array.isArray(parsed.recommendedActions) && parsed.recommendedActions.length > 0 
+          ? parsed.recommendedActions 
+          : (parsed.recommendedAction ? [parsed.recommendedAction] : ["Dispatch field inspection team", "Verify location & road clearance"]);
+
+        console.log(`[Diagnostic] Gemini analysis SUCCESS from ${modelUsed}: detectedIssue=${detectedIssue}, category="${resolvedCategory}", severity=${severityScore}, confidence=${confidenceVal}`);
 
         return res.json({
           status: "success",
           analysis: {
-            issueDetected: parsed.issueDetected !== undefined ? Boolean(parsed.issueDetected) : true,
-            issueType: parsed.issueType || parsed.category || category || "Pothole",
-            confidence: Number(parsed.confidence) || 88,
-            severity: Number(parsed.severity ?? parsed.severityScore) || 60,
-            priority: parsed.priority || (Number(parsed.severity) >= 75 ? "High" : "Medium"),
-            riskLevel: parsed.riskLevel || (Number(parsed.severity) >= 75 ? "High" : "Medium"),
-            description: parsed.description || "Identified urban infrastructure hazard requiring crew remediation.",
-            recommendedActions: Array.isArray(parsed.recommendedActions) ? parsed.recommendedActions : ["Dispatch field inspection team"],
-            reasoning: parsed.reasoning || "Visual features analyzed by Gemini Vision.",
+            issueDetected: detectedIssue,
+            detectedIssue: detectedIssue,
+            issueType: resolvedCategory,
+            category: resolvedCategory,
+            confidence: Math.max(0, Math.min(100, confidenceVal)),
+            severity: Math.max(0, Math.min(100, severityScore)),
+            priority: parsed.priority || (severityScore >= 75 ? "High" : severityScore >= 45 ? "Medium" : "Low"),
+            riskLevel: parsed.riskLevel || (severityScore >= 75 ? "High" : severityScore >= 45 ? "Medium" : "Low"),
+            description: descText,
+            explanation: descText,
+            recommendedActions: actionsList,
+            recommendedAction: actionsList[0] || "Dispatch field inspection team",
+            reasoning: parsed.reasoning || `Visual features verified with ${modelUsed}.`,
             source: "AI_GEMINI"
           }
         });
       } catch (geminiErr: any) {
-        console.log("[Gemini AI] Image analysis fallback activated:", sanitizeErrorMessage(geminiErr?.message || geminiErr).slice(0, 100));
+        console.warn("[Diagnostic] Gemini analysis error, invoking heuristics:", sanitizeErrorMessage(geminiErr?.message || geminiErr).slice(0, 120));
       }
     }
 
@@ -1192,13 +1287,17 @@ Respond ONLY with valid JSON matching:
       status: "success",
       analysis: {
         issueDetected: true,
+        detectedIssue: true,
         issueType,
+        category: issueType,
         confidence: 85,
         severity,
         priority: severity >= 75 ? "High" : "Medium",
         riskLevel: severity >= 75 ? "High" : "Medium",
         description: summary,
+        explanation: summary,
         recommendedActions: actions,
+        recommendedAction: actions[0],
         reasoning: "Rule-based smart infrastructure diagnostics heuristic applied.",
         source: "FALLBACK_HEURISTIC"
       }

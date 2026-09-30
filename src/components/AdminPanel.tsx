@@ -34,7 +34,7 @@ import {
   Shield,
   Loader2
 } from "lucide-react";
-import { User, UserRole, FieldTeamMeta } from "../types";
+import { User, UserRole, FieldTeamMeta, Report, isEmergencySosReport } from "../types";
 import {
   getAdminUsers,
   createAdminUser,
@@ -52,8 +52,10 @@ interface AdminPanelProps {
   currentUserEmail?: string;
   currentUserName?: string;
   initialTab?: AdminTab;
+  reports?: Report[];
   onTabChange?: (tab: AdminTab) => void;
   onUserUpdated?: () => void;
+  onSelectReport?: (report: Report) => void;
 }
 
 type AdminTab = "overview" | "users" | "teams" | "settings";
@@ -63,8 +65,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   currentUserEmail, 
   currentUserName, 
   initialTab,
+  reports = [],
   onTabChange,
-  onUserUpdated 
+  onUserUpdated,
+  onSelectReport
 }) => {
   const adminEmail = currentAdminEmail || currentUserEmail || "admin@urbanpulse.gov";
   const [activeTab, setActiveTab] = useState<AdminTab>(initialTab || "overview");
@@ -513,6 +517,65 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       {/* TAB 1: OVERVIEW */}
       {activeTab === "overview" && (
         <div className="space-y-6">
+          {/* Incident Telemetry & Source Breakdown Banner */}
+          <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 sm:p-6 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-[#F1F5F9]">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-[#2563EB]" />
+                  <h3 className="text-sm font-bold text-[#0F172A]">Platform Incident & Report Telemetry</h3>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-[#EFF6FF] text-[#2563EB] border border-[#BFDBFE]">
+                    Total Reports: {reports.length}
+                  </span>
+                </div>
+                <p className="text-[11px] text-[#64748B] mt-0.5">
+                  Synchronized operational telemetry across AI vision fleets, citizen portals, and SOS beacons
+                </p>
+              </div>
+              <div className="text-xs font-mono font-semibold text-[#64748B]">
+                Active Incidents: <strong className="text-[#0F172A]">{reports.filter(r => r.status !== "Resolved").length}</strong>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
+              {/* Total Reports */}
+              <div className="p-3.5 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl">
+                <span className="text-[11px] font-bold text-[#64748B] uppercase block">Total Reports</span>
+                <span className="text-2xl font-black text-[#0F172A] mt-1 block font-display">
+                  {reports.length}
+                </span>
+                <span className="text-[10px] text-[#64748B] mt-1 block">Live platform volume</span>
+              </div>
+
+              {/* AI Road Scanner */}
+              <div className="p-3.5 bg-[#EFF6FF] border border-[#BFDBFE] rounded-xl">
+                <span className="text-[11px] font-bold text-[#2563EB] uppercase block">AI Road Scanner</span>
+                <span className="text-2xl font-black text-[#1D4ED8] mt-1 block font-display">
+                  {reports.filter(r => r.source === "ROAD_SCANNER" || (r as any).source === "AI_SCANNER").length}
+                </span>
+                <span className="text-[10px] text-[#2563EB] mt-1 block">Automated dashcam vision</span>
+              </div>
+
+              {/* Citizen Reports */}
+              <div className="p-3.5 bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl">
+                <span className="text-[11px] font-bold text-[#16A34A] uppercase block">Citizen Ingest</span>
+                <span className="text-2xl font-black text-[#15803D] mt-1 block font-display">
+                  {reports.filter(r => (r.source === "MANUAL_REPORT" || (r as any).source === "CITIZEN") && !isEmergencySosReport(r)).length}
+                </span>
+                <span className="text-[10px] text-[#16A34A] mt-1 block">Public verified reports</span>
+              </div>
+
+              {/* Emergency SOS */}
+              <div className="p-3.5 bg-[#FEF2F2] border border-[#FECACA] rounded-xl">
+                <span className="text-[11px] font-bold text-[#DC2626] uppercase block">Emergency SOS</span>
+                <span className="text-2xl font-black text-[#B91C1C] mt-1 block font-display">
+                  {reports.filter(r => isEmergencySosReport(r)).length}
+                </span>
+                <span className="text-[10px] text-[#DC2626] mt-1 block">Critical priority beacons</span>
+              </div>
+            </div>
+          </div>
+
           {/* High-Level Metric Tiles (Row of 3 Pastel-Tinted Cards) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             

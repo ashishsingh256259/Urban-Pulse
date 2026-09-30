@@ -3,6 +3,7 @@ import { User, Report, Notification, RoadScanCandidate, RoadScanSession } from "
 import { getReport } from "./services/reportsService";
 import { subscribeToReports, updateReportStatus as dbUpdateReportStatus, bulkUpdateReportStatus, deleteReport, createReport } from "./lib/firestore_reports";
 import { subscribeToNotifications, markNotificationAsRead, markAllNotificationsAsRead } from "./services/notificationsService";
+import { subscribeToDemoState } from "./services/demoDataService";
 import { useAuth } from "./context/AuthContext";
 import { useLanguage } from "./context/LanguageContext";
 import { LanguageToggle } from "./components/LanguageToggle";
@@ -151,6 +152,11 @@ export default function App() {
 
   const [loadingReports, setLoadingReports] = useState(true);
   const [appOnline, setAppOnline] = useState(true);
+  const [isDemoMode, setIsDemoMode] = useState(false);
+
+  useEffect(() => {
+    return subscribeToDemoState(setIsDemoMode);
+  }, []);
   
   // Sovereign Multi-City ready states
   const [selectedCityName, setSelectedCityName] = useState("New Delhi (NCR)");
@@ -890,6 +896,17 @@ export default function App() {
 
             {/* Header Right Controls */}
             <div className="flex items-center gap-2 sm:gap-3">
+              {/* Subtle Professional DEMO DATA Indicator (Visible only when demo fallback is active) */}
+              {isDemoMode && (
+                <div 
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#FEF3C7] border border-[#FDE68A] text-[#92400E] rounded-xl text-[10.5px] font-mono font-bold shadow-2xs animate-in fade-in duration-200"
+                  title="Demonstration dataset active (live Firestore unreachable)"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#D97706] animate-pulse" />
+                  <span>DEMO DATA</span>
+                </div>
+              )}
+
               {/* Unified Sovereign Jurisdiction Selector in Top Header */}
               <div ref={jurisdictionMenuRef} className="relative flex flex-col items-end text-right">
                 <span className="text-[7.5px] sm:text-[8px] font-mono font-bold text-[#64748B] uppercase tracking-wider leading-none mb-0.5 sm:mb-1">
@@ -1466,6 +1483,8 @@ export default function App() {
                   <AdminPanel
                     currentUserEmail={currentUser.email}
                     currentUserName={currentUser.fullName}
+                    reports={reports}
+                    onSelectReport={(rep) => setSelectedReport(rep)}
                     initialTab={
                       activeSubTab === "admin-users" ? "users" :
                       activeSubTab === "admin-teams" ? "teams" :

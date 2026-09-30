@@ -1,16 +1,18 @@
-import { GoogleGenAI } from "@google/genai";
-
 export interface AIAnalysisResponse {
   issueDetected: boolean;
+  detectedIssue?: boolean;
   issueType: "Pothole" | "Garbage Overflow" | "Broken Streetlight" | "Road Obstruction" | "Vandals / Graffiti" | "Other";
+  category?: string;
   confidence: number;
   severity: number;
   priority: "Low" | "Medium" | "High" | "Critical";
   riskLevel: "Low" | "Medium" | "High";
   description: string;
+  explanation?: string;
   recommendedActions: string[];
+  recommendedAction?: string;
   reasoning: string;
-  source: "AI_GEMINI" | "MANUAL_USER";
+  source: "AI_GEMINI" | "MANUAL_USER" | "FALLBACK_HEURISTIC" | "AI_UNAVAILABLE";
 }
 
 /**

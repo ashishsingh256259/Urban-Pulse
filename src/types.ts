@@ -193,11 +193,14 @@ export interface AuditLog {
 
 export interface AIAnalysis {
   category: string;
+  detectedIssue?: boolean;
   severityScore: number;
   riskLevel: "Low" | "Medium" | "High";
   confidence: number;
   description: string;
+  explanation?: string;
   recommendedActions: string[];
+  recommendedAction?: string;
 }
 
 export type AIAnalysisResult = AIAnalysis;

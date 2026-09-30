@@ -3,6 +3,7 @@ import { createNotification } from "../services/notificationsService";
 import { collection, onSnapshot, doc, setDoc, updateDoc, deleteDoc, getDoc, getDocs, addDoc, writeBatch } from "firebase/firestore";
 import { db, stripUndefinedDeep } from "./firebase";
 import { Report } from "../types";
+import { DEMO_REPORTS, setDemoModeActive } from "../services/demoDataService";
 
 export interface UserAuthContext {
   role?: string;
@@ -259,37 +260,22 @@ export const INITIAL_CANONICAL_REPORTS: Report[] = [
   }
 ];
 
-let isBootstrappingReports = false;
-
 export const subscribeToReports = (
   callback: (reports: Report[]) => void,
   onQuotaError?: (err: any) => void
 ) => {
   if (!db) {
-    console.warn("Firestore db instance is unavailable.");
-    callback([]);
+    console.warn("Firestore db instance is unavailable. Activating centralized demo fallback.");
+    setDemoModeActive(true);
+    callback(DEMO_REPORTS);
     return () => {};
   }
 
   const reportsCol = collection(db, "reports");
 
-  return onSnapshot(reportsCol, async (snapshot) => {
-    if (snapshot.empty && !isBootstrappingReports) {
-      isBootstrappingReports = true;
-      try {
-        console.log("[Firestore] Bootstrapping initial canonical reports into Firestore collection...");
-        for (const rep of INITIAL_CANONICAL_REPORTS) {
-          await setDoc(doc(db, "reports", rep.id), stripUndefinedDeep({ ...rep }));
-        }
-        callback(INITIAL_CANONICAL_REPORTS);
-      } catch (seedErr) {
-        console.warn("[Firestore] Bootstrap seeding note:", seedErr);
-        callback(INITIAL_CANONICAL_REPORTS);
-      } finally {
-        isBootstrappingReports = false;
-      }
-      return;
-    }
+  return onSnapshot(reportsCol, (snapshot) => {
+    // Firebase request succeeded -> Use REAL FIRESTORE DATA
+    setDemoModeActive(false);
 
     const reportsList: Report[] = [];
     snapshot.forEach((docSnap) => {
@@ -306,19 +292,29 @@ export const subscribeToReports = (
     handleFirestoreError(error, OperationType.LIST, "reports");
     if (onQuotaError) onQuotaError(error);
 
-    // Resilient REST API fallback
+    // Resilient REST API fallback check
+    let apiSucceeded = false;
     try {
       const resp = await fetch("/api/reports");
       if (resp.ok) {
         const data = await resp.json();
-        if (Array.isArray(data.reports) && data.reports.length > 0) {
+        if (Array.isArray(data.reports)) {
           const normalized = data.reports.map((r: any) => normalizeReportDoc(r.id, r));
           normalized.sort((a: Report, b: Report) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          setDemoModeActive(false);
           callback(normalized);
+          apiSucceeded = true;
         }
       }
     } catch (apiErr) {
       console.warn("[Reports] API fallback notice:", apiErr);
+    }
+
+    // If both Firestore and API fallback fail -> Use centralized DEMO DATA
+    if (!apiSucceeded) {
+      console.info("[Reports] Live data unreachable. Activating centralized 10-report DEMO DATA fallback.");
+      setDemoModeActive(true);
+      callback(DEMO_REPORTS);
     }
   });
 };

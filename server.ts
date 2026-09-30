@@ -1,4 +1,5 @@
-import express, { Request, Response, NextFunction } from "express";
+import express from "express";
+import type { Request, Response, NextFunction } from "express";
 import path from "path";
 import fs from "fs";
 import crypto from "crypto";
@@ -6,7 +7,8 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
-import { initializeApp, getApps, FirebaseApp } from "firebase/app";
+import { initializeApp, getApps } from "firebase/app";
+import type { FirebaseApp } from "firebase/app";
 import { getAuth, signInWithEmailAndPassword } from "firebase/auth";
 import { 
   initializeFirestore, 
@@ -16,9 +18,9 @@ import {
   setDoc, 
   updateDoc, 
   deleteDoc, 
-  setLogLevel,
-  Firestore 
+  setLogLevel
 } from "firebase/firestore";
+import type { Firestore } from "firebase/firestore";
 import dotenv from "dotenv";
 
 dotenv.config();

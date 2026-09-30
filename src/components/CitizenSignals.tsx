@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Report } from "../types";
+import { Report, isEmergencySosReport } from "../types";
 import { useLanguage } from "../context/LanguageContext";
 import { 
   Radio, MessageSquare, ArrowRight, Camera, MapPin, 
@@ -25,8 +25,8 @@ export const CitizenSignals: React.FC<CitizenSignalsProps> = ({
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedSignal, setSelectedSignal] = useState<Report | null>(reports[0] || null);
 
-  // Filter citizen reports
-  const citizenReports = (reports || []).filter(r => r && r.source !== "ROAD_SCANNER");
+  // Filter citizen reports (strictly public manual civic reports, excluding vehicle road scanner and emergency SOS beacons)
+  const citizenReports = (reports || []).filter(r => r && (r.source === "MANUAL_REPORT" || (r as any).source === "CITIZEN" || !r.source) && r.source !== "ROAD_SCANNER" && !isEmergencySosReport(r));
   
   const filteredSignals = citizenReports.filter(r => {
     if (!r) return false;

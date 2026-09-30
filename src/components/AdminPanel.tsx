@@ -32,7 +32,10 @@ import {
   Mail,
   Building,
   Shield,
-  Loader2
+  Loader2,
+  ArrowUpRight,
+  Camera,
+  Radio
 } from "lucide-react";
 import { User, UserRole, FieldTeamMeta, Report, isEmergencySosReport } from "../types";
 import {
@@ -47,6 +50,8 @@ import {
   getDepartmentForCategory
 } from "../services/adminService";
 
+export type AdminTab = "overview" | "reports" | "users" | "teams" | "settings";
+
 interface AdminPanelProps {
   currentAdminEmail?: string;
   currentUserEmail?: string;
@@ -56,9 +61,8 @@ interface AdminPanelProps {
   onTabChange?: (tab: AdminTab) => void;
   onUserUpdated?: () => void;
   onSelectReport?: (report: Report) => void;
+  onNavigateSection?: (sectionId: string, filterOptions?: { source?: string; isSos?: boolean; category?: string; status?: string }) => void;
 }
-
-type AdminTab = "overview" | "users" | "teams" | "settings";
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({ 
   currentAdminEmail, 
@@ -68,10 +72,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   reports = [],
   onTabChange,
   onUserUpdated,
-  onSelectReport
+  onSelectReport,
+  onNavigateSection
 }) => {
   const adminEmail = currentAdminEmail || currentUserEmail || "admin@urbanpulse.gov";
   const [activeTab, setActiveTab] = useState<AdminTab>(initialTab || "overview");
+
+  // Report Registry Filters State
+  const [reportSourceFilter, setReportSourceFilter] = useState<"ALL" | "ROAD_SCANNER" | "CITIZEN" | "EMERGENCY_SOS">("ALL");
+  const [reportStatusFilter, setReportStatusFilter] = useState<string>("ALL");
+  const [reportCategoryFilter, setReportCategoryFilter] = useState<string>("ALL");
+  const [reportSearchQuery, setReportSearchQuery] = useState<string>("");
 
   useEffect(() => {
     if (initialTab) {
@@ -94,6 +105,45 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [userSearch, setUserSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<string>("ALL");
   const [teamSearch, setTeamSearch] = useState("");
+
+  // Dynamic calculations for Incident & Report Telemetry
+  const totalReportsCount = reports.length;
+  const scannerReportsCount = reports.filter(r => r.source === "ROAD_SCANNER" || (r as any).source === "AI_SCANNER").length;
+  const citizenReportsCount = reports.filter(r => (r.source === "MANUAL_REPORT" || (r as any).source === "CITIZEN" || !r.source) && !isEmergencySosReport(r)).length;
+  const sosReportsCount = reports.filter(r => isEmergencySosReport(r) || (r as any).source === "EMERGENCY_SOS").length;
+
+  // Filtered reports for the Admin Report Registry view
+  const filteredAdminReports = reports.filter(r => {
+    if (!r) return false;
+    
+    // Source filter
+    if (reportSourceFilter === "ROAD_SCANNER") {
+      if (r.source !== "ROAD_SCANNER" && (r as any).source !== "AI_SCANNER") return false;
+    } else if (reportSourceFilter === "CITIZEN") {
+      if ((r.source === "ROAD_SCANNER" || (r as any).source === "AI_SCANNER") || isEmergencySosReport(r)) return false;
+    } else if (reportSourceFilter === "EMERGENCY_SOS") {
+      if (!isEmergencySosReport(r) && (r as any).source !== "EMERGENCY_SOS") return false;
+    }
+
+    // Status filter
+    if (reportStatusFilter !== "ALL" && r.status !== reportStatusFilter) return false;
+
+    // Category filter
+    if (reportCategoryFilter !== "ALL" && r.category !== reportCategoryFilter) return false;
+
+    // Search query
+    if (reportSearchQuery.trim()) {
+      const q = reportSearchQuery.toLowerCase();
+      const matchTitle = (r.title || "").toLowerCase().includes(q);
+      const matchDesc = (r.description || "").toLowerCase().includes(q);
+      const matchId = (r.id || "").toLowerCase().includes(q);
+      const matchLoc = (r.location || "").toLowerCase().includes(q);
+      const matchRep = (r.reporterName || r.reporterEmail || "").toLowerCase().includes(q);
+      if (!matchTitle && !matchDesc && !matchId && !matchLoc && !matchRep) return false;
+    }
+
+    return true;
+  });
 
   // Modals state
   const [editingUser, setEditingUser] = useState<User | null>(null);
@@ -478,6 +528,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               <span>Platform Overview</span>
             </button>
             <button
+              onClick={() => handleTabSelect("reports")}
+              className={`px-4 py-2.5 rounded-xl transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                activeTab === "reports"
+                  ? "bg-[#2563EB] text-white shadow-xs font-bold"
+                  : "text-[#334155] hover:text-[#0F172A] hover:bg-white/60 font-semibold"
+              }`}
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>Incident Registry ({reports.length})</span>
+            </button>
+            <button
               onClick={() => handleTabSelect("users")}
               className={`px-4 py-2.5 rounded-xl transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
                 activeTab === "users"
@@ -517,7 +578,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       {/* TAB 1: OVERVIEW */}
       {activeTab === "overview" && (
         <div className="space-y-6">
-          {/* Incident Telemetry & Source Breakdown Banner */}
+          {/* Incident Telemetry & Source Breakdown Banner (Clickable Navigation Entry Points) */}
           <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 sm:p-6 shadow-xs">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-[#F1F5F9]">
               <div>
@@ -529,7 +590,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   </span>
                 </div>
                 <p className="text-[11px] text-[#64748B] mt-0.5">
-                  Synchronized operational telemetry across AI vision fleets, citizen portals, and SOS beacons
+                  Synchronized operational telemetry across AI vision fleets, citizen portals, and SOS beacons. Click any card to navigate.
                 </p>
               </div>
               <div className="text-xs font-mono font-semibold text-[#64748B]">
@@ -538,40 +599,106 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
-              {/* Total Reports */}
-              <div className="p-3.5 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl">
-                <span className="text-[11px] font-bold text-[#64748B] uppercase block">Total Reports</span>
+              {/* Card 1: Total Reports */}
+              <div 
+                onClick={() => {
+                  setReportSourceFilter("ALL");
+                  handleTabSelect("reports");
+                }}
+                className="p-3.5 bg-[#F8FAFC] border border-[#E2E8F0] hover:border-[#2563EB] hover:bg-white rounded-xl transition-all cursor-pointer group flex flex-col justify-between shadow-2xs hover:shadow-xs select-none"
+                title="Click to view all incidents in the Admin Incident Registry"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-[#64748B] group-hover:text-[#2563EB] uppercase block transition-colors">
+                    Total Reports
+                  </span>
+                  <ArrowUpRight className="w-3.5 h-3.5 text-[#94A3B8] group-hover:text-[#2563EB] group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all" />
+                </div>
                 <span className="text-2xl font-black text-[#0F172A] mt-1 block font-display">
-                  {reports.length}
+                  {totalReportsCount}
                 </span>
-                <span className="text-[10px] text-[#64748B] mt-1 block">Live platform volume</span>
+                <span className="text-[10px] text-[#64748B] group-hover:text-[#2563EB] mt-1 block font-medium transition-colors flex items-center gap-1">
+                  <span>View all reports</span>
+                  <span className="font-bold">&rarr;</span>
+                </span>
               </div>
 
-              {/* AI Road Scanner */}
-              <div className="p-3.5 bg-[#EFF6FF] border border-[#BFDBFE] rounded-xl">
-                <span className="text-[11px] font-bold text-[#2563EB] uppercase block">AI Road Scanner</span>
+              {/* Card 2: AI Road Scanner */}
+              <div 
+                onClick={() => {
+                  if (onNavigateSection) {
+                    onNavigateSection("road-scanner", { source: "ROAD_SCANNER" });
+                  } else {
+                    setReportSourceFilter("ROAD_SCANNER");
+                    handleTabSelect("reports");
+                  }
+                }}
+                className="p-3.5 bg-[#EFF6FF] border border-[#BFDBFE] hover:border-[#2563EB] hover:bg-[#DBEAFE]/40 rounded-xl transition-all cursor-pointer group flex flex-col justify-between shadow-2xs hover:shadow-xs select-none"
+                title="Click to open AI Road Scanner workspace"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-[#2563EB] uppercase block">AI Road Scanner</span>
+                  <ArrowUpRight className="w-3.5 h-3.5 text-[#2563EB]/70 group-hover:text-[#2563EB] group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all" />
+                </div>
                 <span className="text-2xl font-black text-[#1D4ED8] mt-1 block font-display">
-                  {reports.filter(r => r.source === "ROAD_SCANNER" || (r as any).source === "AI_SCANNER").length}
+                  {scannerReportsCount}
                 </span>
-                <span className="text-[10px] text-[#2563EB] mt-1 block">Automated dashcam vision</span>
+                <span className="text-[10px] text-[#2563EB] mt-1 block font-medium flex items-center gap-1">
+                  <span>Open AI Scanner</span>
+                  <span className="font-bold">&rarr;</span>
+                </span>
               </div>
 
-              {/* Citizen Reports */}
-              <div className="p-3.5 bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl">
-                <span className="text-[11px] font-bold text-[#16A34A] uppercase block">Citizen Ingest</span>
+              {/* Card 3: Citizen Ingest */}
+              <div 
+                onClick={() => {
+                  if (onNavigateSection) {
+                    onNavigateSection("citizen-signals", { source: "CITIZEN" });
+                  } else {
+                    setReportSourceFilter("CITIZEN");
+                    handleTabSelect("reports");
+                  }
+                }}
+                className="p-3.5 bg-[#F0FDF4] border border-[#BBF7D0] hover:border-[#16A34A] hover:bg-[#DCFCE7]/50 rounded-xl transition-all cursor-pointer group flex flex-col justify-between shadow-2xs hover:shadow-xs select-none"
+                title="Click to open Citizen Signals triage"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-[#16A34A] uppercase block">Citizen Ingest</span>
+                  <ArrowUpRight className="w-3.5 h-3.5 text-[#16A34A]/70 group-hover:text-[#16A34A] group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all" />
+                </div>
                 <span className="text-2xl font-black text-[#15803D] mt-1 block font-display">
-                  {reports.filter(r => (r.source === "MANUAL_REPORT" || (r as any).source === "CITIZEN") && !isEmergencySosReport(r)).length}
+                  {citizenReportsCount}
                 </span>
-                <span className="text-[10px] text-[#16A34A] mt-1 block">Public verified reports</span>
+                <span className="text-[10px] text-[#16A34A] mt-1 block font-medium flex items-center gap-1">
+                  <span>Open Citizen Signals</span>
+                  <span className="font-bold">&rarr;</span>
+                </span>
               </div>
 
-              {/* Emergency SOS */}
-              <div className="p-3.5 bg-[#FEF2F2] border border-[#FECACA] rounded-xl">
-                <span className="text-[11px] font-bold text-[#DC2626] uppercase block">Emergency SOS</span>
+              {/* Card 4: Emergency SOS */}
+              <div 
+                onClick={() => {
+                  if (onNavigateSection) {
+                    onNavigateSection("emergency-sos", { isSos: true });
+                  } else {
+                    setReportSourceFilter("EMERGENCY_SOS");
+                    handleTabSelect("reports");
+                  }
+                }}
+                className="p-3.5 bg-[#FEF2F2] border border-[#FECACA] hover:border-[#DC2626] hover:bg-[#FEE2E2]/60 rounded-xl transition-all cursor-pointer group flex flex-col justify-between shadow-2xs hover:shadow-xs select-none"
+                title="Click to open Emergency SOS workspace"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-[#DC2626] uppercase block">Emergency SOS</span>
+                  <ArrowUpRight className="w-3.5 h-3.5 text-[#DC2626]/70 group-hover:text-[#DC2626] group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all" />
+                </div>
                 <span className="text-2xl font-black text-[#B91C1C] mt-1 block font-display">
-                  {reports.filter(r => isEmergencySosReport(r)).length}
+                  {sosReportsCount}
                 </span>
-                <span className="text-[10px] text-[#DC2626] mt-1 block">Critical priority beacons</span>
+                <span className="text-[10px] text-[#DC2626] mt-1 block font-medium flex items-center gap-1">
+                  <span>Open Emergency SOS</span>
+                  <span className="font-bold">&rarr;</span>
+                </span>
               </div>
             </div>
           </div>
@@ -814,6 +941,260 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               <div className="pt-3 border-t border-[#E2E8F0] flex items-center justify-between text-[11px] font-mono text-[#64748B]">
                 <span>Dispatch SLA Target:</span>
                 <span className="font-bold text-[#16A34A]">&lt; 45 Mins Ground Response</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB: INCIDENT REGISTRY & REPORT MANAGEMENT */}
+      {activeTab === "reports" && (
+        <div className="space-y-6">
+          <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 sm:p-6 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-[#F1F5F9] gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <FileText className="w-5 h-5 text-[#2563EB]" />
+                  <h2 className="text-base font-bold text-[#0F172A] font-sans">
+                    Platform Incident Registry & Incident Management
+                  </h2>
+                  <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-[#EFF6FF] text-[#2563EB] border border-[#BFDBFE]">
+                    {filteredAdminReports.length} of {reports.length} Incidents
+                  </span>
+                </div>
+                <p className="text-xs text-[#64748B] mt-1">
+                  Master registry spanning automated AI road vision, citizen reports, and emergency SOS beacons
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleTabSelect("overview")}
+                  className="px-3.5 py-1.5 text-xs font-bold text-[#64748B] hover:text-[#0F172A] bg-[#F8FAFC] hover:bg-[#F1F5F9] border border-[#E2E8F0] rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <span>&larr; Back to Overview</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Source Pill Filter Bar */}
+            <div className="flex flex-wrap items-center gap-2 pt-4 pb-2">
+              <span className="text-xs font-bold text-[#64748B] mr-1">Source Filter:</span>
+              <button
+                onClick={() => setReportSourceFilter("ALL")}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  reportSourceFilter === "ALL"
+                    ? "bg-[#2563EB] text-white shadow-xs"
+                    : "bg-[#F8FAFC] text-[#64748B] hover:bg-[#F1F5F9] border border-[#E2E8F0]"
+                }`}
+              >
+                <span>All Sources</span>
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-black/10">
+                  {totalReportsCount}
+                </span>
+              </button>
+
+              <button
+                onClick={() => setReportSourceFilter("ROAD_SCANNER")}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  reportSourceFilter === "ROAD_SCANNER"
+                    ? "bg-[#1D4ED8] text-white shadow-xs"
+                    : "bg-[#EFF6FF] text-[#2563EB] hover:bg-[#DBEAFE] border border-[#BFDBFE]"
+                }`}
+              >
+                <Camera className="w-3.5 h-3.5" />
+                <span>AI Road Scanner</span>
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-black/10">
+                  {scannerReportsCount}
+                </span>
+              </button>
+
+              <button
+                onClick={() => setReportSourceFilter("CITIZEN")}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  reportSourceFilter === "CITIZEN"
+                    ? "bg-[#15803D] text-white shadow-xs"
+                    : "bg-[#F0FDF4] text-[#16A34A] hover:bg-[#DCFCE7] border border-[#BBF7D0]"
+                }`}
+              >
+                <Radio className="w-3.5 h-3.5" />
+                <span>Citizen Ingest</span>
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-black/10">
+                  {citizenReportsCount}
+                </span>
+              </button>
+
+              <button
+                onClick={() => setReportSourceFilter("EMERGENCY_SOS")}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  reportSourceFilter === "EMERGENCY_SOS"
+                    ? "bg-[#B91C1C] text-white shadow-xs"
+                    : "bg-[#FEF2F2] text-[#DC2626] hover:bg-[#FEE2E2] border border-[#FECACA]"
+                }`}
+              >
+                <ShieldAlert className="w-3.5 h-3.5 animate-pulse" />
+                <span>Emergency SOS</span>
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-black/10">
+                  {sosReportsCount}
+                </span>
+              </button>
+            </div>
+
+            {/* Filters Row: Search + Status + Category */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3">
+              <div className="relative">
+                <Search className="w-4 h-4 text-[#94A3B8] absolute left-3.5 top-3 pointer-events-none" />
+                <input
+                  type="text"
+                  value={reportSearchQuery}
+                  onChange={(e) => setReportSearchQuery(e.target.value)}
+                  placeholder="Search by ID, title, location, reporter..."
+                  className="w-full pl-9 pr-3.5 py-2 text-xs bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl focus:bg-white focus:outline-hidden focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] transition-all"
+                />
+              </div>
+
+              <div>
+                <select
+                  value={reportStatusFilter}
+                  onChange={(e) => setReportStatusFilter(e.target.value)}
+                  className="w-full px-3 py-2 text-xs bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl focus:bg-white focus:outline-hidden focus:border-[#2563EB] text-[#334155] font-medium"
+                >
+                  <option value="ALL">All Statuses</option>
+                  <option value="Pending">Pending</option>
+                  <option value="Assigned">Assigned</option>
+                  <option value="In Progress">In Progress</option>
+                  <option value="Resolved">Resolved</option>
+                </select>
+              </div>
+
+              <div>
+                <select
+                  value={reportCategoryFilter}
+                  onChange={(e) => setReportCategoryFilter(e.target.value)}
+                  className="w-full px-3 py-2 text-xs bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl focus:bg-white focus:outline-hidden focus:border-[#2563EB] text-[#334155] font-medium"
+                >
+                  <option value="ALL">All Categories</option>
+                  <option value="Pothole">Pothole</option>
+                  <option value="Garbage Overflow">Garbage Overflow</option>
+                  <option value="Broken Streetlight">Broken Streetlight</option>
+                  <option value="Road Obstruction">Road Obstruction</option>
+                  <option value="Other">Other / Emergency</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Reports Table */}
+            <div className="mt-4 border border-[#E2E8F0] rounded-xl overflow-hidden bg-white">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-[#F8FAFC] border-b border-[#E2E8F0] text-[#64748B] font-bold uppercase tracking-wider text-[10px]">
+                      <th className="py-3 px-4">Report ID</th>
+                      <th className="py-3 px-4">Incident Details</th>
+                      <th className="py-3 px-4">Ingest Source</th>
+                      <th className="py-3 px-4">Severity &amp; Risk</th>
+                      <th className="py-3 px-4">Location</th>
+                      <th className="py-3 px-4 text-center">Status</th>
+                      <th className="py-3 px-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#F1F5F9]">
+                    {filteredAdminReports.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="py-12 text-center text-[#94A3B8]">
+                          <FileText className="w-8 h-8 mx-auto mb-2 opacity-40 text-[#94A3B8]" />
+                          <p className="text-xs font-semibold text-[#64748B]">No reports found matching criteria</p>
+                          <p className="text-[11px] text-[#94A3B8] mt-0.5">Try adjusting search keyword or source filter</p>
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredAdminReports.map((rep) => {
+                        const isSos = isEmergencySosReport(rep);
+                        const isScanner = rep.source === "ROAD_SCANNER" || (rep as any).source === "AI_SCANNER";
+                        return (
+                          <tr 
+                            key={rep.id}
+                            onClick={() => onSelectReport?.(rep)}
+                            className="hover:bg-[#F8FAFC] transition-colors cursor-pointer group"
+                          >
+                            <td className="py-3 px-4 font-mono font-bold text-[#475569] whitespace-nowrap">
+                              <span className="text-[#2563EB] group-hover:underline">
+                                {rep.id}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 max-w-xs">
+                              <div className="font-bold text-[#0F172A] line-clamp-1 group-hover:text-[#2563EB] transition-colors">
+                                {rep.title}
+                              </div>
+                              <div className="text-[11px] text-[#64748B] line-clamp-1 mt-0.5">
+                                {rep.description}
+                              </div>
+                            </td>
+                            <td className="py-3 px-4 whitespace-nowrap">
+                              {isSos ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-[#FEF2F2] text-[#DC2626] border border-[#FECACA]">
+                                  <ShieldAlert className="w-3 h-3 text-[#DC2626]" />
+                                  <span>Emergency SOS</span>
+                                </span>
+                              ) : isScanner ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-[#EFF6FF] text-[#2563EB] border border-[#BFDBFE]">
+                                  <Camera className="w-3 h-3 text-[#2563EB]" />
+                                  <span>AI Road Scanner</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-[#F0FDF4] text-[#16A34A] border border-[#BBF7D0]">
+                                  <Radio className="w-3 h-3 text-[#16A34A]" />
+                                  <span>Citizen Report</span>
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-3 px-4 whitespace-nowrap">
+                              <div className="flex items-center gap-1.5 font-mono font-bold">
+                                <span className={`w-2 h-2 rounded-full ${
+                                  rep.severity >= 80 ? "bg-[#DC2626] animate-pulse" :
+                                  rep.severity >= 50 ? "bg-[#F59E0B]" :
+                                  "bg-[#16A34A]"
+                                }`} />
+                                <span className="text-[#0F172A]">{rep.severity}%</span>
+                                <span className="text-[10px] text-[#64748B] font-sans font-semibold">
+                                  ({rep.riskLevel || "Med"})
+                                </span>
+                              </div>
+                            </td>
+                            <td className="py-3 px-4 max-w-[180px] truncate text-[#64748B]" title={rep.location}>
+                              <div className="flex items-center gap-1">
+                                <MapPin className="w-3 h-3 text-[#94A3B8] shrink-0" />
+                                <span className="truncate">{rep.location || "Delhi NCR Corridor"}</span>
+                              </div>
+                            </td>
+                            <td className="py-3 px-4 text-center whitespace-nowrap">
+                              <span className={`px-2.5 py-0.5 rounded-full text-[10.5px] font-bold border ${
+                                rep.status === "Resolved"
+                                  ? "bg-[#F0FDF4] text-[#16A34A] border-[#DCFCE7]"
+                                  : rep.status === "In Progress"
+                                  ? "bg-[#EFF6FF] text-[#2563EB] border-[#DBEAFE]"
+                                  : rep.status === "Assigned"
+                                  ? "bg-[#FAF5FF] text-[#7C3AED] border-[#F3E8FF]"
+                                  : "bg-[#FFFBEB] text-[#D97706] border-[#FEF3C7]"
+                              }`}>
+                                {rep.status}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                onClick={() => onSelectReport?.(rep)}
+                                className="px-2.5 py-1 text-xs font-bold text-[#2563EB] hover:text-white bg-[#EFF6FF] hover:bg-[#2563EB] border border-[#BFDBFE] rounded-lg transition-all cursor-pointer flex items-center gap-1 ml-auto"
+                              >
+                                <Eye className="w-3 h-3" />
+                                <span>Inspect</span>
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>

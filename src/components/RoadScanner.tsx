@@ -78,16 +78,20 @@ export interface AutoReportedIncident {
 
 interface RoadScannerProps {
   currentUserEmail: string;
+  reports?: Report[];
   onCandidatesReady: (session: RoadScanSession) => void;
   onSwitchToManual: () => void;
   onIncidentAutoReported?: (report: Report) => void;
+  onSelectReport?: (report: Report) => void;
 }
 
 export default function RoadScanner({
   currentUserEmail,
+  reports = [],
   onCandidatesReady,
   onSwitchToManual,
-  onIncidentAutoReported
+  onIncidentAutoReported,
+  onSelectReport
 }: RoadScannerProps) {
   const { t, isHindi } = useLanguage();
   // 1. INPUT SOURCE SELECTION
@@ -128,6 +132,33 @@ export default function RoadScanner({
   // Candidates & Incidents
   const [candidates, setCandidates] = useState<RoadScanCandidate[]>([]);
   const [autoIncidents, setAutoIncidents] = useState<AutoReportedIncident[]>([]);
+
+  // Sync existing scanner reports from platform dataset if active
+  useEffect(() => {
+    if (reports && reports.length > 0) {
+      const scannerReps = reports.filter(r => r && (r.source === "ROAD_SCANNER" || (r as any).source === "AI_SCANNER"));
+      if (scannerReps.length > 0) {
+        setAutoIncidents(prev => {
+          if (prev.length > 0) return prev; // Keep live detected ones
+          return scannerReps.map(r => ({
+            id: `INC-${r.id}`,
+            reportId: r.id,
+            hazardType: r.issueType || r.category || "Pothole",
+            severity: r.severity,
+            confidence: r.confidence || 92,
+            estimatedSize: r.estimatedWidth ? `${r.estimatedWidth} x ${r.estimatedLength || '0.8m'}` : "1.2m x 0.8m",
+            location: r.location || "Delhi NCR Arterial",
+            timestamp: new Date(r.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            sourceCamera: r.sourceCamera || "Vehicle Dashcam",
+            evidenceImage: r.image || r.imageUrl || r.evidenceUrl || "",
+            observationsCount: r.clusterCount || 2,
+            workflowState: r.workflowState || (r.status === "Resolved" ? "RESOLVED" : "AI VERIFIED")
+          }));
+        });
+      }
+    }
+  }, [reports]);
+
   const [recentAlert, setRecentAlert] = useState<{
     category: string;
     severity: number;
@@ -1767,13 +1798,20 @@ export default function RoadScanner({
                 autoIncidents.map((inc) => (
                   <div
                     key={inc.id}
-                    className="p-2.5 bg-[#F8FAFC] rounded-xl border border-[#E2E8F0] flex items-center justify-between text-xs transition-all hover:border-[#CBD5E1]"
+                    onClick={() => {
+                      if (onSelectReport && reports) {
+                        const target = reports.find(r => r.id === inc.reportId);
+                        if (target) onSelectReport(target);
+                      }
+                    }}
+                    className={`p-2.5 bg-[#F8FAFC] rounded-xl border border-[#E2E8F0] flex items-center justify-between text-xs transition-all hover:border-[#2563EB] hover:bg-white ${onSelectReport ? 'cursor-pointer group' : ''}`}
+                    title={onSelectReport ? "Click to view full incident details" : undefined}
                   >
                     <div className="flex items-center gap-2.5">
                       <div className="w-2.5 h-2.5 rounded-full bg-[#DC2626] animate-pulse"></div>
                       <div>
                         <div className="flex items-center gap-1.5">
-                          <span className="font-bold text-[#172033]">
+                          <span className="font-bold text-[#172033] group-hover:text-[#2563EB] transition-colors">
                             {isHindi && inc.hazardType.toLowerCase().includes("pothole") ? "सड़क का गड्ढा" : inc.hazardType}
                           </span>
                           <span className="text-[9px] font-mono bg-[#F0FDF4] text-[#16A34A] border border-[#BBF7D0] px-1 rounded font-bold">

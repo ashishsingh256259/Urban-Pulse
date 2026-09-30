@@ -1329,6 +1329,8 @@ export default function App() {
               <div className="w-full">
                 <RoadScanner
                   currentUserEmail={currentUser.email}
+                  reports={reports}
+                  onSelectReport={(rep) => setSelectedReport(rep)}
                   onIncidentAutoReported={(newRep) => {
                     setReports((prev) => [newRep, ...prev]);
                   }}
@@ -1485,6 +1487,21 @@ export default function App() {
                     currentUserName={currentUser.fullName}
                     reports={reports}
                     onSelectReport={(rep) => setSelectedReport(rep)}
+                    onNavigateSection={(sectionId) => {
+                      if (sectionId === "road-scanner") {
+                        setActiveSubTab("road-scanner");
+                      } else if (sectionId === "citizen-signals") {
+                        setActiveSubTab("citizen-signals");
+                      } else if (sectionId === "emergency-sos") {
+                        setActiveSubTab("emergency-sos");
+                      } else if (sectionId === "command-center") {
+                        setActiveSubTab("command-center");
+                      } else if (sectionId === "incident-intelligence") {
+                        setActiveSubTab("incident-intelligence");
+                      } else if (sectionId === "safety") {
+                        setActiveSubTab("safety");
+                      }
+                    }}
                     initialTab={
                       activeSubTab === "admin-users" ? "users" :
                       activeSubTab === "admin-teams" ? "teams" :

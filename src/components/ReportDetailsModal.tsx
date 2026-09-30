@@ -7,6 +7,7 @@ import {
 import { getReportHistory } from "../services/reportsService";
 import { DEFAULT_FIELD_TEAMS, approveFieldResolution, rejectFieldResolution } from "../services/fieldOperationsService";
 import { useLanguage } from "../context/LanguageContext";
+import ReportExportButton from "./ReportExportButton";
 
 interface ReportDetailsModalProps {
   report: Report | null;
@@ -204,12 +205,21 @@ export default function ReportDetailsModal({
             </span>
           </div>
 
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-full text-gray-400 hover:bg-gray-200 hover:text-gray-700 transition-colors cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <ReportExportButton 
+              report={report} 
+              userRole={userRole} 
+              isAdmin={isAdmin} 
+              variant="secondary"
+            />
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-full text-gray-400 hover:bg-gray-200 hover:text-gray-700 transition-colors cursor-pointer"
+              title="Close modal"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Scrollable contents */}

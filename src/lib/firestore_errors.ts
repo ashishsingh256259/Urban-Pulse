@@ -27,16 +27,14 @@ export interface FirestoreErrorInfo {
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errMessage = error instanceof Error ? error.message : String(error);
-  const isQuotaError = errMessage.toLowerCase().includes("quota") || (error as any)?.code === "resource-exhausted";
-
-  if (isQuotaError) {
-    console.warn(`Firestore Quota limit reached for ${operationType} on ${path}. Operating smoothly with local/cached data.`);
-    return;
-  }
+  const errString = error instanceof Error ? error.message : String(error);
+  const isQuotaError = errString.includes('Quota limit exceeded') || 
+                       errString.includes('Quota exceeded') || 
+                       errString.includes('resource-exhausted') || 
+                       errString.includes('quota limits are reset');
 
   const errInfo: FirestoreErrorInfo = {
-    error: errMessage,
+    error: errString,
     authInfo: {
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email,
@@ -51,5 +49,10 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     operationType,
     path
   };
-  console.warn('Firestore Operation Notice: ', JSON.stringify(errInfo));
+
+  if (isQuotaError) {
+    console.warn('Firestore Notice (Quota Exceeded): ', JSON.stringify(errInfo));
+  } else {
+    console.error('Firestore Error: ', JSON.stringify(errInfo));
+  }
 }

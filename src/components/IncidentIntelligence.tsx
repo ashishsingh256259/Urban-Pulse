@@ -9,6 +9,7 @@ import {
   TrendingUp, Compass, CheckSquare
 } from "lucide-react";
 import { updateReportStatus } from "../lib/firestore_reports";
+import ReportExportButton from "./ReportExportButton";
 
 interface IncidentIntelligenceProps {
   reports: Report[];
@@ -211,13 +212,20 @@ export const IncidentIntelligence: React.FC<IncidentIntelligenceProps> = ({
                   </span>
                   <span className="text-xs font-mono text-[#94A3B8]">ID: {currentReport.id}</span>
                 </div>
-                <span className={`text-xs font-bold px-3 py-1 rounded-full border ${
-                  currentReport.status === "Resolved" ? "bg-[#F0FDF4] text-[#16A34A] border-[#DCFCE7]" :
-                  currentReport.status === "In Progress" ? "bg-[#EFF6FF] text-[#2563EB] border-[#DBEAFE]" :
-                  "bg-[#FFFBEB] text-[#D97706] border-[#FEF3C7]"
-                }`}>
-                  ● Status: {currentReport.status}
-                </span>
+                <div className="flex items-center gap-2">
+                  <ReportExportButton 
+                    report={currentReport} 
+                    userRole="municipal" 
+                    variant="outline"
+                  />
+                  <span className={`text-xs font-bold px-3 py-1 rounded-full border ${
+                    currentReport.status === "Resolved" ? "bg-[#F0FDF4] text-[#16A34A] border-[#DCFCE7]" :
+                    currentReport.status === "In Progress" ? "bg-[#EFF6FF] text-[#2563EB] border-[#DBEAFE]" :
+                    "bg-[#FFFBEB] text-[#D97706] border-[#FEF3C7]"
+                  }`}>
+                    ● Status: {currentReport.status}
+                  </span>
+                </div>
               </div>
 
               <h2 className="text-lg font-black text-[#172033] tracking-tight">

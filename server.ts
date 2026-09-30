@@ -577,8 +577,13 @@ app.get("/api/reports", async (req: Request, res: Response) => {
         return res.json({ reports: reportsList });
 
       } catch (firestoreErr: any) {
-        console.error("[Firestore] Read error:", firestoreErr);
-        return res.status(500).json({ error: "Database service unavailable." });
+        const errMsg = firestoreErr?.message || String(firestoreErr);
+        if (!errMsg.includes("Quota limit exceeded") && !errMsg.includes("Quota exceeded") && !errMsg.includes("resource-exhausted")) {
+          console.warn("[Firestore] Read reports fallback notice:", errMsg);
+        }
+        const memList = Array.from(inMemoryStore.reports.values());
+        memList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        return res.json({ reports: memList });
       }
     }
 
@@ -1012,8 +1017,9 @@ app.get("/api/notifications", async (req: Request, res: Response) => {
           notifList.forEach(n => inMemoryStore.notifications.set(n.id, n));
         }
       } catch (fErr: any) {
-        if (fErr?.code !== "permission-denied") {
-          console.warn("[Firestore] Read notifications note:", fErr);
+        const errMsg = fErr?.message || String(fErr);
+        if (!errMsg.includes("Quota limit exceeded") && !errMsg.includes("Quota exceeded") && !errMsg.includes("resource-exhausted") && fErr?.code !== "permission-denied") {
+          console.warn("[Firestore] Read notifications fallback notice:", errMsg);
         }
       }
     }

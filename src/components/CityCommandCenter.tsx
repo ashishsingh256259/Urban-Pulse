@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from "react";
-import { Report } from "../types";
+import { Report, UserRole } from "../types";
 import { useLanguage } from "../context/LanguageContext";
+import ReportExportButton from "./ReportExportButton";
 import { 
   ShieldAlert, Activity, CheckCircle, Clock, MapPin, 
   AlertTriangle, ArrowUpRight, ArrowRight, Layers,
@@ -13,12 +14,14 @@ interface CityCommandCenterProps {
   reports: Report[];
   onSelectReport: (report: Report) => void;
   onSelectSubTab: (tab: string) => void;
+  userRole?: UserRole;
 }
 
 export default function CityCommandCenter({ 
   reports, 
   onSelectReport,
-  onSelectSubTab
+  onSelectSubTab,
+  userRole = "municipal"
 }: CityCommandCenterProps) {
   const { t, isHindi } = useLanguage();
 
@@ -312,7 +315,13 @@ export default function CityCommandCenter({
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <ReportExportButton 
+                    report={topPriorityIncident} 
+                    userRole={userRole} 
+                    variant="outline" 
+                  />
+
                   <button
                     onClick={() => onSelectReport(topPriorityIncident)}
                     className="px-4 py-2 bg-[#F8FAFC] hover:bg-[#EFF6FF] text-[#2563EB] border border-[#DBEAFE] rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"

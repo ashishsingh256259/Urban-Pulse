@@ -7,6 +7,8 @@ import {
   signOut as firebaseSignOut,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   AuthError
 } from "firebase/auth";
 import { auth } from "../lib/firebase";
@@ -38,6 +40,10 @@ export function formatAuthErrorMessage(error: unknown): string {
   switch (code) {
     case "auth/operation-not-allowed":
       return "Email/Password sign-in is disabled in your Firebase Console. Please enable Email/Password under Authentication > Sign-in method in Firebase Console, or sign in using Google Sign-In.";
+    case "auth/unauthorized-domain":
+      return "The current domain (urban-pulse-blue.vercel.app) is not authorized in Firebase Console. To authorize: Go to Firebase Console > Authentication > Settings > Authorized Domains, and add 'urban-pulse-blue.vercel.app'.";
+    case "auth/popup-blocked":
+      return "Authentication popup was blocked by browser. Initiating secure redirect sign-in...";
     case "auth/invalid-email":
       return "The email address format is invalid.";
     case "auth/user-disabled":
@@ -130,6 +136,36 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Sync auth state listener with onAuthStateChanged and authoritative profile
   useEffect(() => {
+    // Check redirect auth result if returning from redirect sign-in
+    getRedirectResult(auth)
+      .then(async (result) => {
+        if (result && result.user) {
+          const googleUser = result.user;
+          let profile = await getUserProfile(googleUser.uid);
+          if (!profile) {
+            const email = googleUser.email || "";
+            const assignedRole = determineRole(email);
+            const name = googleUser.displayName || (email ? email.split("@")[0] : "User");
+            profile = {
+              uid: googleUser.uid,
+              email,
+              name,
+              fullName: name,
+              role: assignedRole,
+              points: 50,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            };
+            await setUserProfile(profile);
+          }
+          setUserProfileState(profile);
+          localStorage.setItem("urbanpulse_active_profile", JSON.stringify(profile));
+        }
+      })
+      .catch((err) => {
+        if (err) console.warn("getRedirectResult auth notice:", err.message || err);
+      });
+
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       try {
         if (firebaseUser) {
@@ -475,10 +511,26 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setAuthError(null);
     localStorage.removeItem("urbanpulse_active_profile");
 
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" });
+
     try {
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: "select_account" });
-      const result = await signInWithPopup(auth, provider);
+      let result;
+      try {
+        result = await signInWithPopup(auth, provider);
+      } catch (popupErr: any) {
+        if (
+          popupErr?.code === "auth/popup-blocked" || 
+          popupErr?.code === "auth/cancelled-popup-request" ||
+          popupErr?.code === "auth/popup-closed-by-user"
+        ) {
+          console.warn("Popup sign-in blocked or closed, switching to redirect flow...");
+          await signInWithRedirect(auth, provider);
+          return null as any;
+        }
+        throw popupErr;
+      }
+
       const googleUser = result.user;
       const uid = googleUser.uid;
 
@@ -509,16 +561,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return profile;
     } catch (err: any) {
       console.error("Google Sign-In error:", err);
-      if (err?.code === "auth/popup-closed-by-user") {
-        const msg = "Google sign-in popup was closed before completing.";
-        setAuthError(msg);
-        throw new Error(msg);
-      } else if (err?.code === "auth/popup-blocked") {
-        const msg = "Sign-in popup was blocked by browser. Please allow popups or retry.";
-        setAuthError(msg);
-        throw new Error(msg);
-      }
-
       const formatted = formatAuthErrorMessage(err);
       setAuthError(formatted);
       throw new Error(formatted);

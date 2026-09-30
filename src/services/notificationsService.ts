@@ -81,8 +81,25 @@ export function subscribeToNotifications(
     // Sort by createdAt descending
     notifList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
+    if (notifList.length > 0) {
+      try {
+        localStorage.setItem(`urbanpulse_cached_notifs_${userRole}_${normalizedEmail}`, JSON.stringify(notifList));
+      } catch (e) {}
+    }
+
     callback(notifList);
   }, (error) => {
+    try {
+      const cached = localStorage.getItem(`urbanpulse_cached_notifs_${userRole}_${normalizedEmail}`);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          callback(parsed);
+          return;
+        }
+      }
+    } catch (e) {}
+
     handleFirestoreError(error, OperationType.LIST, "notifications");
   });
 

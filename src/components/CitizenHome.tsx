@@ -32,82 +32,108 @@ export default function CitizenHome({
     <div className="flex flex-col gap-4 text-left animate-in fade-in duration-200">
       
       {/* 1. UPGRADED CITIZEN HERO BANNER */}
-      <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-blue-950 rounded-2xl p-3.5 sm:p-4.5 text-white relative overflow-hidden border border-blue-900/60 shadow-md">
+      <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-blue-950 rounded-2xl p-4 sm:p-5 text-white relative overflow-hidden border border-blue-900/60 shadow-md">
         {/* Subtle background glow */}
         <div className="absolute -top-12 -right-12 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none" />
         <div className="absolute -bottom-12 -left-12 w-48 h-48 bg-purple-500/10 rounded-full blur-2xl pointer-events-none" />
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 lg:gap-4 items-center relative z-10">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-center relative z-10">
           
-          {/* LEFT COLUMN: Headline, Subtext, Process Label, Visual Flow */}
+          {/* LEFT COLUMN: Headline, Subtext, Process Pipeline, Impact Line, CTAs */}
           <div className="lg:col-span-7 flex flex-col justify-between">
             <div>
               {/* Badge & Compact Pipeline Bar */}
-              <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
-                <div className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-500/20 text-blue-300 rounded-full text-[9.5px] sm:text-[10.5px] font-bold font-mono border border-blue-400/30">
-                  <Shield className="w-2.5 h-2.5 text-blue-400" />
+              <div className="flex flex-wrap items-center gap-1.5 mb-2">
+                <div className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-blue-500/20 text-blue-300 rounded-full text-[9.5px] sm:text-[10.5px] font-bold font-mono border border-blue-400/30">
+                  <Shield className="w-3 h-3 text-blue-400" />
                   <span>CIVIC SAFETY & REPAIR PLATFORM</span>
                 </div>
-                <div className="inline-block px-2 py-0.5 bg-slate-800/90 text-blue-300 rounded-full text-[9px] sm:text-[10px] font-mono font-bold border border-slate-700">
-                  DETECT → ANALYZE → PRIORITIZE → ACT → VERIFY
+                <div className="inline-block px-2.5 py-0.5 bg-slate-800/90 text-blue-300 rounded-full text-[9px] sm:text-[10px] font-mono font-bold border border-slate-700">
+                  REPORT → ASSESS → PRIORITIZE → ACT → VERIFY
                 </div>
               </div>
 
               {/* Headline */}
-              <h1 className="text-lg sm:text-xl lg:text-2xl font-black tracking-tight text-white font-sans leading-tight">
+              <h1 className="text-xl sm:text-2xl lg:text-3xl font-black tracking-tight text-white font-sans leading-tight">
                 {isHindi ? "सड़क समस्या से त्वरित समाधान तक" : "From Road Problem to Rapid Resolution"}
               </h1>
 
               {/* Subtext */}
-              <p className="text-[11px] sm:text-xs text-slate-300 font-medium mt-1 leading-snug max-w-xl">
+              <p className="text-xs sm:text-sm text-slate-300 font-medium mt-1.5 leading-relaxed max-w-xl">
                 {isHindi 
-                  ? "एआई शहरी सड़क समस्याओं का पता लगाता है, उनकी गंभीरता को समझता है, जोखिम को प्राथमिकता देता है, और नागरिकों को सीधे नगर पालिका टीमों से जोड़ता है।" 
-                  : "AI detects urban road issues, understands their severity, prioritizes risk, and connects citizens directly with municipal response teams."}
+                  ? "शहरी समस्या की रिपोर्ट करें, इसके जोखिम को समझें, इसकी प्रगति को ट्रैक करें, और अपने शहर को इसे तेजी से हल करने में मदद करें।" 
+                  : "Report an urban issue, understand its risk, track its progress, and help your city resolve it faster."}
               </p>
+
+              {/* Hero Action CTAs */}
+              <div className="flex flex-wrap items-center gap-2.5 mt-3">
+                <button
+                  type="button"
+                  onClick={() => onNavigate('infrastructure')}
+                  className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+                >
+                  <PenLine className="w-3.5 h-3.5" />
+                  <span>{isHindi ? "समस्या दर्ज करें" : "Report a Problem"}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onNavigate('my-reports')}
+                  className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer"
+                >
+                  <span>{isHindi ? "मेरी रिपोर्ट ट्रैक करें" : "Track My Reports"}</span>
+                </button>
+              </div>
             </div>
 
             {/* Visual Flow (6-step pipeline) */}
-            <div className="mt-2.5 pt-2 border-t border-slate-700/60">
+            <div className="mt-3 pt-2.5 border-t border-slate-700/60">
               <div className="text-[9.5px] font-mono font-bold uppercase tracking-wider text-slate-400 mb-1.5">
-                {isHindi ? "समाधान चक्र" : "Rapid Resolution Pipeline"}
+                {isHindi ? "नागरिक यात्रा प्रवाह" : "Incident Resolution Journey"}
               </div>
               <div className="flex flex-wrap items-center gap-1 text-[10px]">
                 <div className="bg-slate-800/90 border border-slate-700 rounded-lg px-2 py-1 flex items-center gap-1 text-slate-200 shadow-xs">
-                  <span className="text-[11px]">📷</span>
-                  <span className="font-semibold">{isHindi ? "नागरिक रिपोर्ट" : "Citizen Report"}</span>
+                  <span className="text-[11px]">📸</span>
+                  <span className="font-semibold">{isHindi ? "नागरिक रिपोर्ट" : "Reported"}</span>
                 </div>
                 <span className="text-slate-500 font-mono text-[10px] hidden sm:inline">→</span>
                 <div className="bg-slate-800/90 border border-slate-700 rounded-lg px-2 py-1 flex items-center gap-1 text-blue-300 shadow-xs">
                   <span className="text-[11px]">🤖</span>
-                  <span className="font-semibold">{isHindi ? "एआई पहचान" : "AI Detection"}</span>
+                  <span className="font-semibold">{isHindi ? "एआई समीक्षा" : "AI Reviewed"}</span>
                 </div>
                 <span className="text-slate-500 font-mono text-[10px] hidden sm:inline">→</span>
                 <div className="bg-slate-800/90 border border-slate-700 rounded-lg px-2 py-1 flex items-center gap-1 text-amber-300 shadow-xs">
                   <span className="text-[11px]">⚠️</span>
-                  <span className="font-semibold">{isHindi ? "जोखिम आकलन" : "Risk Assessment"}</span>
+                  <span className="font-semibold">{isHindi ? "प्राथमिकता प्राप्त" : "Prioritized"}</span>
                 </div>
                 <span className="text-slate-500 font-mono text-[10px] hidden sm:inline">→</span>
                 <div className="bg-slate-800/90 border border-slate-700 rounded-lg px-2 py-1 flex items-center gap-1 text-purple-300 shadow-xs">
                   <span className="text-[11px]">🏛️</span>
-                  <span className="font-semibold">{isHindi ? "नगर पालिका" : "Municipal Action"}</span>
+                  <span className="font-semibold">{isHindi ? "आवंटित टीम" : "Assigned"}</span>
                 </div>
                 <span className="text-slate-500 font-mono text-[10px] hidden sm:inline">→</span>
                 <div className="bg-slate-800/90 border border-slate-700 rounded-lg px-2 py-1 flex items-center gap-1 text-cyan-300 shadow-xs">
                   <span className="text-[11px]">👷</span>
-                  <span className="font-semibold">{isHindi ? "फील्ड रिस्पॉन्स" : "Field Response"}</span>
+                  <span className="font-semibold">{isHindi ? "मरम्मत" : "Repair"}</span>
                 </div>
                 <span className="text-slate-500 font-mono text-[10px] hidden sm:inline">→</span>
                 <div className="bg-slate-800/90 border border-emerald-500/40 rounded-lg px-2 py-1 flex items-center gap-1 text-emerald-300 font-bold shadow-xs">
                   <span className="text-[11px]">✅</span>
-                  <span>{isHindi ? "सत्यापित समाधान" : "Verified Resolution"}</span>
+                  <span>{isHindi ? "सत्यापित" : "Verified"}</span>
                 </div>
               </div>
+
+              {/* Citizen Impact Message */}
+              <p className="text-[10.5px] text-blue-300/90 italic mt-2 font-medium">
+                "{isHindi 
+                  ? "आपकी रिपोर्ट सिर्फ एक शिकायत नहीं है — यह कार्रवाई योग्य शहरी बुद्धिमत्ता बनती है।" 
+                  : "Your report becomes more than a complaint — it becomes actionable city intelligence."}"
+              </p>
             </div>
           </div>
 
-          {/* RIGHT COLUMN: Compact AI Incident Preview Card */}
+          {/* RIGHT COLUMN: Compact Hero AI Insight Card */}
           <div className="lg:col-span-5">
-            <div className="bg-slate-800/95 border border-blue-500/40 rounded-xl p-2.5 sm:p-3 shadow-md relative backdrop-blur-xs">
+            <div className="bg-slate-800/95 border border-blue-500/40 rounded-xl p-3 shadow-md relative backdrop-blur-xs">
               <div className="flex items-center justify-between pb-1 mb-1.5 border-b border-slate-700/80">
                 <div className="flex items-center gap-1.5">
                   <span className="relative flex h-2 w-2">
@@ -115,45 +141,50 @@ export default function CitizenHome({
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
                   </span>
                   <span className="text-[10px] font-mono font-bold tracking-wider text-red-400 uppercase">
-                    AI ALERT
+                    AI ROAD INSIGHT
                   </span>
                 </div>
-                <span className="text-[9px] font-mono text-slate-400 bg-slate-900/80 px-1.5 py-0.5 rounded border border-slate-700">
-                  TELEMETRY PREVIEW
+                <span className="text-[8.5px] font-mono text-slate-400 bg-slate-900/80 px-1.5 py-0.5 rounded border border-slate-700">
+                  PROTOTYPE PREVIEW
                 </span>
               </div>
 
-              <h4 className="text-[11px] font-black text-white tracking-tight mb-1.5 flex items-center justify-between">
+              <h4 className="text-xs font-black text-white tracking-tight mb-1.5 flex items-center justify-between">
                 <span>High-Risk Road Issue Detected</span>
                 <span className="text-[9.5px] font-mono text-amber-300 bg-amber-500/20 px-1.5 py-0.5 rounded border border-amber-500/30">
                   87/100
                 </span>
               </h4>
 
-              <div className="grid grid-cols-2 gap-1.5 text-[10px] bg-slate-900/70 p-2 rounded-lg border border-slate-700/60 mb-1.5">
+              <div className="grid grid-cols-2 gap-1.5 text-[10.5px] bg-slate-900/70 p-2.5 rounded-lg border border-slate-700/60 mb-2">
                 <div>
                   <span className="text-[8.5px] font-mono text-slate-400 block uppercase">{isHindi ? "समस्या:" : "Issue:"}</span>
-                  <span className="font-bold text-white">Pothole</span>
+                  <span className="font-bold text-white">Large Pothole</span>
                 </div>
                 <div>
                   <span className="text-[8.5px] font-mono text-slate-400 block uppercase">{isHindi ? "स्थान:" : "Location:"}</span>
-                  <span className="font-bold text-white">Sector 62</span>
+                  <span className="font-bold text-white">Sector 62, Main Road</span>
                 </div>
                 <div>
                   <span className="text-[8.5px] font-mono text-slate-400 block uppercase">{isHindi ? "जोखिम स्कोर:" : "Risk Score:"}</span>
                   <span className="font-bold text-red-400 font-mono">87/100</span>
                 </div>
                 <div>
+                  <span className="text-[8.5px] font-mono text-slate-400 block uppercase">{isHindi ? "स्थिति:" : "Status:"}</span>
+                  <span className="font-bold text-amber-300">Requires municipal attention</span>
+                </div>
+                <div className="col-span-2 pt-1 border-t border-slate-800">
                   <span className="text-[8.5px] font-mono text-slate-400 block uppercase">{isHindi ? "कार्रवाई:" : "Action:"}</span>
-                  <span className="font-bold text-blue-300">Field Inspection Required</span>
+                  <span className="font-bold text-blue-300">Field inspection recommended</span>
                 </div>
               </div>
 
-              <div className="flex items-center justify-between text-[9.5px] text-slate-400">
+              <div className="flex items-center justify-between text-[9px] text-slate-400">
                 <span className="flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                   Direct Municipal Dispatch Connected
                 </span>
+                <span className="italic text-[8.5px] text-slate-500">(Prototype Demo Data)</span>
               </div>
             </div>
           </div>

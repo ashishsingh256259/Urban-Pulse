@@ -1257,6 +1257,7 @@ export default function App() {
 
             {/* Workspace Area */}
             <main className="flex-1 p-3.5 sm:p-5 lg:p-6 flex flex-col gap-4 bg-[#F5F7FB] text-slate-900 transition-colors">
+              {activeSubTab !== "emergency-sos" && activeSubTab !== "road-scanner" && activeSubTab !== "candidate-review" && activeSubTab !== "safe-route" && (
               <div className="bg-white border border-[#E2E8F0] p-4 sm:p-5 rounded-2xl shadow-xs text-left transition-colors">
                 <div className="flex items-center gap-2.5">
                   <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${
@@ -1320,6 +1321,7 @@ export default function App() {
                   {activeSubTab === "emergency" && (isHindi ? "आपातकालीन वाहन मार्ग और त्वरित सहायता प्राथमिकताएं।" : "Continuous transit routing, determining hazard bypass coordinates and dispatcher assignment priorities for hospital responder lanes.")}
                 </p>
               </div>
+              )}
 
             {/* DESIGN THINKING LOOP PHILOSOPHY TRACK FOR MUNICIPAL & ADMIN */}
             {(currentUser.role === "municipal" || currentUser.role === "admin") && (

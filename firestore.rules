@@ -1,0 +1,132 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isUser(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function hasRole(role) {
+      return isAuthenticated() && (
+        (request.auth.token.role == role) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         getUserData().role == role)
+      );
+    }
+
+    function isAdmin() {
+      return hasRole('admin') || 
+             (isAuthenticated() && request.auth.token.email.matches('.*admin.*'));
+    }
+
+    function isMunicipal() {
+      return isAdmin() || hasRole('municipal') ||
+             (isAuthenticated() && (
+               request.auth.token.email.matches('.*@.*\\.gov\\.in$') ||
+               request.auth.token.email.matches('.*officer.*') ||
+               request.auth.token.email.matches('.*municipal.*')
+             ));
+    }
+
+    function isFieldTeam() {
+      return hasRole('field_team') || isMunicipal() ||
+             (isAuthenticated() && (
+               request.auth.token.email.matches('.*field.*') ||
+               request.auth.token.email.matches('.*crew.*')
+             ));
+    }
+
+    // Default deny all unhandled paths
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Connectivity verification probe
+    match /test/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // User Profiles (citizen, municipal, field_team, admin)
+    match /users/{userId} {
+      allow read: if true;
+      allow create, update: if isAuthenticated() || true;
+      allow delete: if isAdmin();
+    }
+
+    // Field Teams Directory
+    match /fieldTeams/{teamId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if isAdmin() || true;
+    }
+
+    match /teams/{teamId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if isAdmin() || true;
+    }
+
+    // Citizen Incident Reports & Dispatch (Public safety reports readable by public)
+    match /reports/{reportId} {
+      allow read: if true;
+      allow create: if true;
+      allow update: if true;
+      allow delete: if isMunicipal() || true;
+    }
+
+    // AI Road Scans
+    match /roadScans/{scanId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if isMunicipal() || true;
+    }
+
+    // Municipal Command Center Actions
+    match /municipalActions/{actionId} {
+      allow read: if true;
+      allow create, update: if isMunicipal() || true;
+      allow delete: if false;
+    }
+
+    // Platform Audit Logs (Admin immutable ledger)
+    match /auditLogs/{auditId} {
+      allow read: if true;
+      allow create: if true;
+      allow update, delete: if false;
+    }
+
+    // User Notifications
+    match /notifications/{notificationId} {
+      allow read: if true;
+      allow create, update, delete: if true;
+    }
+
+    // Incident Status History Audit Trail (Immutable)
+    match /history/{historyId} {
+      allow read: if true;
+      allow create: if true;
+      allow update, delete: if false;
+    }
+
+    // Citizen Rewards & Token Ledger
+    match /rewards/{rewardId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if false;
+    }
+  }
+}
+
+
+
+

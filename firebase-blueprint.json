@@ -1,0 +1,234 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with role-based access for citizens and municipal administrators",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier for the user" },
+        "email": { "type": "string", "description": "Email address" },
+        "fullName": { "type": "string", "description": "Display name of the user" },
+        "role": { "type": "string", "enum": ["citizen", "admin", "municipal", "field_team"], "description": "User role determining permissions" },
+        "teamId": { "type": "string", "description": "Field team identifier" },
+        "teamName": { "type": "string", "description": "Field team name" },
+        "teamLead": { "type": "string", "description": "Field team lead supervisor" },
+        "availability": { "type": "string", "enum": ["AVAILABLE", "BUSY", "OFFLINE"], "description": "Current field crew availability" },
+        "points": { "type": "integer", "description": "Civic reward points balance" },
+        "badges": { "type": "array", "description": "Earned civic badges" },
+        "scansCount": { "type": "integer", "description": "Total road scanner runs completed" },
+        "reportsCount": { "type": "integer", "description": "Total manual & scanner reports submitted" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp of creation" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Timestamp of last profile update" }
+      },
+      "required": ["id", "email", "fullName", "role", "createdAt"]
+    },
+    "Report": {
+      "title": "Report",
+      "description": "Urban hazard report from manual citizen report or AI road scanner",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string", "enum": ["Pothole", "Garbage Overflow", "Broken Streetlight", "Road Obstruction", "Vandals / Graffiti", "Other"] },
+        "severity": { "type": "integer" },
+        "riskLevel": { "type": "string", "enum": ["Low", "Medium", "High"] },
+        "priority": { "type": "string", "enum": ["Low", "Medium", "High", "Critical"] },
+        "confidence": { "type": "integer" },
+        "status": { "type": "string", "enum": ["Pending", "Assigned", "In Progress", "Resolved"] },
+        "location": { "type": "string" },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "image": { "type": "string" },
+        "evidenceUrl": { "type": "string" },
+        "reporterEmail": { "type": "string" },
+        "assignedTo": { "type": "string" },
+        "source": { "type": "string", "enum": ["MANUAL_REPORT", "ROAD_SCANNER"] },
+        "roadScanId": { "type": "string" },
+        "clusterCount": { "type": "integer" },
+        "evidenceFrames": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "aiAnalysis": {
+          "type": "object",
+          "properties": {
+            "category": { "type": "string" },
+            "severityScore": { "type": "integer" },
+            "riskLevel": { "type": "string", "enum": ["Low", "Medium", "High"] },
+            "confidence": { "type": "integer" },
+            "description": { "type": "string" },
+            "recommendedActions": { "type": "array" }
+          }
+        },
+        "fieldStatus": { "type": "string", "description": "Operational field status" },
+        "assignment": {
+          "type": "object",
+          "properties": {
+            "teamId": { "type": "string" },
+            "teamName": { "type": "string" },
+            "assignedBy": { "type": "string" },
+            "assignedAt": { "type": "string" },
+            "acceptedAt": { "type": "string" },
+            "enRouteAt": { "type": "string" },
+            "arrivedAt": { "type": "string" },
+            "reassignmentRequested": { "type": "boolean" },
+            "reassignmentReason": { "type": "string" }
+          }
+        },
+        "fieldVerification": {
+          "type": "object",
+          "properties": {
+            "result": { "type": "string" },
+            "notes": { "type": "string" },
+            "verifiedBy": { "type": "string" },
+            "verifiedAt": { "type": "string" },
+            "gpsVerified": { "type": "boolean" },
+            "evidenceUrls": { "type": "array" }
+          }
+        },
+        "resolution": {
+          "type": "object",
+          "properties": {
+            "action": { "type": "string" },
+            "notes": { "type": "string" },
+            "beforeEvidence": { "type": "array" },
+            "afterEvidence": { "type": "array" },
+            "submittedBy": { "type": "string" },
+            "submittedAt": { "type": "string" },
+            "approvedBy": { "type": "string" },
+            "approvedAt": { "type": "string" },
+            "rejectionReason": { "type": "string" }
+          }
+        }
+      },
+      "required": ["id", "title", "description", "category", "severity", "riskLevel", "confidence", "status", "location", "latitude", "longitude", "reporterEmail", "createdAt", "updatedAt"]
+    },
+    "RoadScan": {
+      "title": "RoadScan",
+      "description": "Metadata document for completed AI dashcam scanner sessions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "endedAt": { "type": "string", "format": "date-time" },
+        "frameCount": { "type": "integer" },
+        "candidateCount": { "type": "integer" },
+        "totalDistanceMeters": { "type": "number" },
+        "totalDetections": { "type": "integer" },
+        "status": { "type": "string", "enum": ["RECORDING", "PROCESSING", "REVIEW_READY", "COMPLETED"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "startedAt", "frameCount", "candidateCount", "status", "createdAt"]
+    },
+    "MunicipalAction": {
+      "title": "MunicipalAction",
+      "description": "Dispatch action or status update performed by municipal staff",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "reportId": { "type": "string" },
+        "municipalUserId": { "type": "string" },
+        "officerName": { "type": "string" },
+        "action": { "type": "string" },
+        "status": { "type": "string", "enum": ["Pending", "Assigned", "In Progress", "Resolved"] },
+        "comment": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "reportId", "action", "status", "comment", "createdAt"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Citizen status and high-severity admin alerts",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "recipientEmail": { "type": "string" },
+        "recipientRole": { "type": "string", "enum": ["citizen", "admin", "municipal", "field_team", "all"] },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "type": { "type": "string", "enum": ["report_status", "report_submitted", "alert_high_severity", "system"] },
+        "reportId": { "type": "string" },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "recipientEmail", "recipientRole", "title", "message", "type", "reportId", "read", "createdAt"]
+    },
+    "RewardTransaction": {
+      "title": "RewardTransaction",
+      "description": "Ledger entry recording awarded civic points for hazard reports",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "pointsAwarded": { "type": "integer" },
+        "reason": { "type": "string" },
+        "reportId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "pointsAwarded", "reason", "createdAt"]
+    },
+    "FieldTeam": {
+      "title": "FieldTeam",
+      "description": "Registered municipal field operations squad metadata and availability",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "lead": { "type": "string" },
+        "category": { "type": "string" },
+        "district": { "type": "string" },
+        "department": { "type": "string" },
+        "serviceZone": { "type": "string" },
+        "phone": { "type": "string" },
+        "availability": { "type": "string", "enum": ["AVAILABLE", "ON_TASK", "OFFLINE", "EMERGENCY", "UNAVAILABLE"] },
+        "activeTaskCount": { "type": "integer" },
+        "currentIncidentId": { "type": "string" },
+        "currentIncidentTitle": { "type": "string" },
+        "lastOperationalStatus": { "type": "string" },
+        "lastUpdate": { "type": "string" },
+        "membersCount": { "type": "integer" },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "name", "lead", "category", "district"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles and civic point records"
+    },
+    "/fieldTeams/{teamId}": {
+      "schema": "FieldTeam",
+      "description": "Field operations squads directory and telemetry"
+    },
+    "/teams/{teamId}": {
+      "schema": "FieldTeam",
+      "description": "Teams alias directory"
+    },
+    "/reports/{reportId}": {
+      "schema": "Report",
+      "description": "City reports index containing status, severity & AI diagnostics"
+    },
+    "/roadScans/{scanId}": {
+      "schema": "RoadScan",
+      "description": "Road scanner session logs and summary metrics"
+    },
+    "/municipalActions/{actionId}": {
+      "schema": "MunicipalAction",
+      "description": "Municipal officer audit logs and dispatch actions"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "Citizen status notifications and alerts queue"
+    },
+    "/rewards/{rewardId}": {
+      "schema": "RewardTransaction",
+      "description": "Civic points rewards ledger"
+    }
+  }
+}

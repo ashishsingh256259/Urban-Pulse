@@ -1,0 +1,6 @@
+{
+  "name": "UrbanPulse Guardian AI",
+  "description": "The AI Operating System for Safer, Smarter Cities featuring real-time AI issue analysis, citizen reporting, dynamic safety heatmaps, and a comprehensive municipality decision-support command center.",
+  "requestFramePermissions": ["camera", "geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

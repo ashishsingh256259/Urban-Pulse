@@ -440,12 +440,14 @@ export async function assignFieldTask(
     } catch {}
   }
 
-  const assignment: FieldAssignment = {
+  const assignment: FieldAssignment & { assignedTeamId?: string; assignedTeamName?: string } = {
     assignmentId: `asgn_${reportId}_${Date.now()}`,
     reportId,
     fieldTeamId: teamId,
     teamId,
     teamName,
+    assignedTeamId: teamId,
+    assignedTeamName: teamName,
     assignedBy: officerName,
     assignedAt: now,
     status: "ASSIGNED",
@@ -463,6 +465,8 @@ export async function assignFieldTask(
       const docRef = doc(db, "reports", reportId);
       await updateDoc(docRef, stripUndefinedDeep({
         assignedTo: teamName,
+        assignedTeamId: teamId,
+        assignedTeamName: teamName,
         priority,
         fieldStatus: "ASSIGNED",
         workflowState: "ASSIGNED",
@@ -579,12 +583,14 @@ export async function reassignFieldTask(
 
   const updatedHistory = [...existingHistory, reassignmentRecord];
 
-  const updatedAssignment: FieldAssignment = {
+  const updatedAssignment: FieldAssignment & { assignedTeamId?: string; assignedTeamName?: string } = {
     assignmentId: `asgn_${reportId}_${Date.now()}`,
     reportId,
     fieldTeamId: newTeamId,
     teamId: newTeamId,
     teamName: newTeamName,
+    assignedTeamId: newTeamId,
+    assignedTeamName: newTeamName,
     assignedBy: officerName,
     assignedAt: now,
     status: "ASSIGNED",
@@ -603,6 +609,8 @@ export async function reassignFieldTask(
       const docRef = doc(db, "reports", reportId);
       await updateDoc(docRef, stripUndefinedDeep({
         assignedTo: newTeamName,
+        assignedTeamId: newTeamId,
+        assignedTeamName: newTeamName,
         priority: currentPriority,
         fieldStatus: "ASSIGNED",
         workflowState: "ASSIGNED",

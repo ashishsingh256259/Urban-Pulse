@@ -3,7 +3,7 @@ import { createNotification } from "../services/notificationsService";
 import { collection, onSnapshot, doc, setDoc, updateDoc, deleteDoc, getDoc, getDocs, addDoc, writeBatch } from "firebase/firestore";
 import { db, stripUndefinedDeep } from "./firebase";
 import { Report } from "../types";
-import { DEMO_REPORTS, setDemoModeActive } from "../services/demoDataService";
+import { DEMO_REPORTS, setDemoModeActive, isDemoModeActive } from "../services/demoDataService";
 
 export interface UserAuthContext {
   role?: string;
@@ -74,6 +74,11 @@ export const normalizeReportDoc = (id: string, data: any): Report => {
     boundingBox: data.boundingBox,
     isSos: isSos,
     emergencyType: data.emergencyType || undefined,
+    rejectionReason: data.rejectionReason,
+    rejectionNote: data.rejectionNote,
+    rejectedAt: data.rejectedAt ? parseIsoDate(data.rejectedAt) : undefined,
+    rejectedBy: data.rejectedBy,
+    rejectedByRole: data.rejectedByRole,
     createdAt: parseIsoDate(data.createdAt),
     updatedAt: parseIsoDate(data.updatedAt || data.createdAt),
     aiAnalysis: data.aiAnalysis || null
@@ -370,9 +375,36 @@ export const updateReportStatus = async (
     throw new Error("Unauthorized: Only authenticated Municipal officers can perform status updates.");
   }
 
+  const nowStr = new Date().toISOString();
+
+  // Support demo mode directly to avoid calling undefined Firestore when offline/demo is active
+  if (!db || isDemoModeActive()) {
+    const rep = DEMO_REPORTS.find(r => r.id === id);
+    if (rep) {
+      rep.status = status as any;
+      rep.updatedAt = nowStr;
+      
+      // Send demo notifications safely
+      if (rep.reporterEmail) {
+        try {
+          await createNotification(
+            `Report Status Updated to ${status}`,
+            comment || `Your report "${rep.title}" has been updated by the Municipal Command Center.`,
+            "report_submitted",
+            "citizen",
+            rep.reporterEmail,
+            id
+          );
+        } catch (e) {
+          console.warn("Failed to create demo status notification:", e);
+        }
+      }
+    }
+    return;
+  }
+
   const docRef = doc(db, "reports", id);
   const snap = await getDoc(docRef);
-  const nowStr = new Date().toISOString();
 
   await updateDoc(docRef, {
     status,

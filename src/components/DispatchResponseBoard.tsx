@@ -87,11 +87,34 @@ export const DispatchResponseBoard: React.FC<DispatchResponseBoardProps> = ({
   const handleAdvanceStatus = async (report: Report, nextStatus: Report["status"]) => {
     setUpdatingId(report.id);
     try {
-      await updateReportStatus(
-        report.id, 
-        nextStatus, 
-        `Advanced status to ${nextStatus} via Municipal Dispatch Board by ${currentUserName || 'Dispatcher'}`
-      );
+      if (nextStatus === "Assigned") {
+        // Automatically assign the recommended team matching the hazard category
+        const { getRecommendedTeamForCategory, assignFieldTask } = await import("../services/fieldOperationsService");
+        const recommendedTeam = getRecommendedTeamForCategory(report.category);
+        if (recommendedTeam) {
+          await assignFieldTask(
+            report.id,
+            recommendedTeam.id,
+            recommendedTeam.name,
+            currentUserName || "Municipal Dispatcher",
+            report.priority || "Medium",
+            "Auto-assigned recommended team based on incident category via Dispatch Board",
+            24
+          );
+        } else {
+          await updateReportStatus(
+            report.id,
+            nextStatus,
+            `Advanced status to ${nextStatus} via Municipal Dispatch Board by ${currentUserName || 'Dispatcher'}`
+          );
+        }
+      } else {
+        await updateReportStatus(
+          report.id,
+          nextStatus,
+          `Advanced status to ${nextStatus} via Municipal Dispatch Board by ${currentUserName || 'Dispatcher'}`
+        );
+      }
       if (onRefreshReports) onRefreshReports();
     } catch (err) {
       console.error("Dispatch update failed:", err);
@@ -209,7 +232,7 @@ export const DispatchResponseBoard: React.FC<DispatchResponseBoardProps> = ({
                         <div className="p-2 bg-white rounded-xl border border-[#E2E8F0] text-[9.5px]">
                           <span className="text-[#94A3B8] uppercase block text-[8px] font-mono">Assigned Squad:</span>
                           <span className="font-bold text-[#172033] truncate block">
-                            {rep.assignedTo ? rep.assignedTo.split("@")[0] : "Road Maintenance Team Alpha"}
+                            {rep.assignedTo ? rep.assignedTo.split("@")[0] : "Awaiting Squad Assignment"}
                           </span>
                         </div>
 

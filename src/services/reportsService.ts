@@ -72,6 +72,11 @@ export const reportConverter: FirestoreDataConverter<Report> = {
     if (report.boundingBox) docData.boundingBox = report.boundingBox;
     if (report.isSos !== undefined) docData.isSos = report.isSos;
     if (report.emergencyType) docData.emergencyType = report.emergencyType;
+    if (report.rejectionReason) docData.rejectionReason = report.rejectionReason;
+    if (report.rejectionNote) docData.rejectionNote = report.rejectionNote;
+    if (report.rejectedAt) docData.rejectedAt = report.rejectedAt;
+    if (report.rejectedBy) docData.rejectedBy = report.rejectedBy;
+    if (report.rejectedByRole) docData.rejectedByRole = report.rejectedByRole;
 
     return stripUndefinedDeep(docData);
   },
@@ -116,6 +121,11 @@ export const reportConverter: FirestoreDataConverter<Report> = {
       boundingBox: data.boundingBox,
       isSos: isSos,
       emergencyType: data.emergencyType || undefined,
+      rejectionReason: data.rejectionReason || undefined,
+      rejectionNote: data.rejectionNote || undefined,
+      rejectedAt: data.rejectedAt || undefined,
+      rejectedBy: data.rejectedBy || undefined,
+      rejectedByRole: data.rejectedByRole || undefined,
       createdAt: data.createdAt || new Date().toISOString(),
       updatedAt: data.updatedAt || new Date().toISOString(),
       aiAnalysis: data.aiAnalysis || null

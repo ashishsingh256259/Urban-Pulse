@@ -22,6 +22,7 @@ import {
   analyzeFieldEvidenceWithAI
 } from "../services/fieldOperationsService";
 import { uploadFieldEvidence } from "../services/storageService";
+import { createNotification } from "../services/notificationsService";
 import { 
   ShieldAlert, 
   CheckCircle2, 
@@ -42,6 +43,7 @@ import {
   Compass, 
   Phone, 
   UserCheck, 
+  Users,
   AlertOctagon, 
   Eye, 
   RefreshCw, 
@@ -62,7 +64,9 @@ interface FieldTeamDashboardProps {
   teamId?: string;
   teamName?: string;
   teamLead?: string;
+  initialTab?: FieldTab;
   onRefreshReports: () => void;
+  onNavigateSidebar?: (tabId: "overview" | "map" | "safety" | "copilot" | "profile") => void;
 }
 
 type FieldTab = 
@@ -84,7 +88,9 @@ export default function FieldTeamDashboard({
   teamId = "RT-014",
   teamName = "Road Maintenance Team Alpha",
   teamLead = "Supervisor Vikram Singh",
-  onRefreshReports
+  initialTab,
+  onRefreshReports,
+  onNavigateSidebar
 }: FieldTeamDashboardProps) {
   const isMunicipalMonitor = currentUserRole === "municipal" || currentUserRole === "admin";
   // Current active team
@@ -94,7 +100,60 @@ export default function FieldTeamDashboard({
   }, [selectedTeamId]);
 
   // Tab navigation
-  const [activeTab, setActiveTab] = useState<FieldTab>("overview");
+  const [activeTab, setActiveTab] = useState<FieldTab>(initialTab || "overview");
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
+
+  // Emergency SOS State
+  const [sosType, setSosType] = useState("CRITICAL_INJURY");
+  const [sosNotes, setSosNotes] = useState("");
+  const [isSubmittingSos, setIsSubmittingSos] = useState(false);
+  const [sosSuccess, setSosSuccess] = useState(false);
+
+  const handleSendEmergencySOS = async () => {
+    if (!sosNotes.trim()) return;
+    setIsSubmittingSos(true);
+    try {
+      await createNotification(
+        `🚨 CRITICAL FIELD SOS: ${activeTeam.id} - ${activeTeam.name}`,
+        `Emergency Priority: ${sosType.replace("_", " ")}. Details: ${sosNotes}. Crew Location: ${crewLocation.latitude.toFixed(5)}°N, ${crewLocation.longitude.toFixed(5)}°E. Direct Phone: ${activeTeam.phone}.`,
+        "emergency_sos",
+        "all",
+        "",
+        "SYSTEM"
+      );
+
+      try {
+        await fetch("/api/notifications", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: `🚨 CRITICAL FIELD SOS: ${activeTeam.id} - ${activeTeam.name}`,
+            message: `Emergency Priority: ${sosType.replace("_", " ")}. Details: ${sosNotes}. Crew Location: ${crewLocation.latitude.toFixed(5)}°N, ${crewLocation.longitude.toFixed(5)}°E. Direct Phone: ${activeTeam.phone}.`,
+            type: "emergency_sos",
+            recipientRole: "all",
+            recipientEmail: "",
+            reportId: "SYSTEM"
+          })
+        });
+      } catch (err) {
+        console.warn("Rest SOS backup dispatch warning:", err);
+      }
+
+      setSosSuccess(true);
+      setSosNotes("");
+      setTimeout(() => setSosSuccess(false), 5000);
+      onRefreshReports();
+    } catch (err) {
+      console.error("SOS Transmission Error:", err);
+    } finally {
+      setIsSubmittingSos(false);
+    }
+  };
 
   // Crew state
   const [availability, setAvailability] = useState<"AVAILABLE" | "BUSY" | "OFFLINE">("AVAILABLE");
@@ -180,12 +239,20 @@ export default function FieldTeamDashboard({
   // Filter tasks assigned to this team
   const assignedReports = useMemo(() => {
     return reports.filter(r => {
-      // Direct team assignment match OR unassigned if in fallback testing
-      if (r.assignment?.teamId === activeTeam.id) return true;
-      if (r.assignedTo && r.assignedTo.toLowerCase().includes(activeTeam.name.toLowerCase())) return true;
-      if (r.assignedTo && r.assignedTo.toLowerCase().includes(activeTeam.id.toLowerCase())) return true;
-      // Also match category if status is Assigned and no explicit team
-      if (r.status === "Assigned" && r.category.toLowerCase() === activeTeam.category.toLowerCase()) return true;
+      // Direct team assignment ID match is the primary source of truth
+      const reportTeamId = r.assignedTeamId || r.assignment?.teamId || r.assignment?.fieldTeamId;
+      if (reportTeamId) {
+        return reportTeamId === activeTeam.id;
+      }
+      
+      // Fallback matching for string assignedTo
+      if (r.assignedTo) {
+        const cleanAssignedTo = r.assignedTo.toLowerCase();
+        const cleanTeamName = activeTeam.name.toLowerCase();
+        const cleanTeamId = activeTeam.id.toLowerCase();
+        return cleanAssignedTo === cleanTeamId || cleanAssignedTo === cleanTeamName || cleanAssignedTo.includes(cleanTeamId);
+      }
+      
       return false;
     });
   }, [reports, activeTeam]);
@@ -790,19 +857,20 @@ export default function FieldTeamDashboard({
         {[
           { id: "overview", label: "Dashboard", icon: Sliders },
           { id: "tasks", label: `My Tasks (${stats.total})`, icon: CheckCircle2, badge: stats.critical > 0 ? stats.critical : undefined },
-          { id: "map", label: "GIS Navigation Map", icon: MapPin },
           { id: "verify", label: "Field Verification", icon: Camera },
           { id: "work", label: "Work & Resolution", icon: Wrench },
-          { id: "copilot", label: "Field Copilot AI", icon: Sparkles },
-          { id: "safety", label: "Safety & SOS", icon: AlertOctagon },
-          { id: "profile", label: "Team Profile", icon: UserCheck },
         ].map(tab => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
           return (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id as FieldTab)}
+              onClick={() => {
+                setActiveTab(tab.id as FieldTab);
+                if (onNavigateSidebar) {
+                  onNavigateSidebar("overview");
+                }
+              }}
               className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs shrink-0 transition-all cursor-pointer ${
                 isActive
                   ? "bg-blue-600 text-white shadow-sm"
@@ -1756,95 +1824,211 @@ export default function FieldTeamDashboard({
       {/* 7. SAFETY & SOS VIEW */}
       {/* =================================================== */}
       {activeTab === "safety" && (
-        <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200 shadow-2xs flex flex-col gap-6 max-w-2xl mx-auto">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center shrink-0">
-              <AlertOctagon className="w-6 h-6" />
-            </div>
-            <div>
-              <h3 className="text-lg font-black text-slate-900">Field Safety & Incident Alert</h3>
-              <p className="text-xs text-slate-500">
-                Immediately report unsafe physical conditions, traffic hazards, or structural risks to the Municipal Dispatch Desk.
-              </p>
-            </div>
-          </div>
-
-          {unsafeSuccess && (
-            <div className="p-4 bg-emerald-50 border border-emerald-300 text-emerald-800 rounded-2xl text-xs font-bold flex items-center gap-2">
-              <CheckCircle className="w-4 h-4" />
-              <span>Safety alert broadcasted to Municipal Command Center! Dispatch has been notified.</span>
-            </div>
-          )}
-
-          <form onSubmit={handleReportUnsafe} className="flex flex-col gap-4">
-            <div>
-              <label className="text-xs font-extrabold text-slate-700 block mb-1.5">Associated Incident</label>
-              <select
-                value={selectedTask?.id || ""}
-                onChange={(e) => {
-                  const t = reports.find(r => r.id === e.target.value);
-                  setSelectedTask(t || null);
-                }}
-                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-hidden focus:border-blue-500 cursor-pointer"
-                required
-              >
-                <option value="">-- Select Incident Site --</option>
-                {assignedReports.map(t => (
-                  <option key={t.id} value={t.id}>
-                    [{t.id.slice(-6).toUpperCase()}] {t.title} - {t.location || "Delhi NCR"}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="text-xs font-extrabold text-slate-700 block mb-1.5">Hazard Condition Type</label>
-              <div className="grid grid-cols-2 gap-2">
-                {[
-                  { id: "TRAFFIC_RISK", label: "High Speed Traffic / No Barrier" },
-                  { id: "LIVE_WIRE", label: "Live Electrical Wire Exposed" },
-                  { id: "STRUCTURAL_COLLAPSE", label: "Structural Collapse Hazard" },
-                  { id: "TOXIC_SPILL", label: "Chemical / Sewage Spill" },
-                  { id: "WEATHER_RISK", label: "Adverse Weather / Flash Flood" },
-                  { id: "BYSTANDER_INTERFERENCE", label: "Hostile Crowds / Interference" }
-                ].map(cond => (
-                  <button
-                    key={cond.id}
-                    type="button"
-                    onClick={() => setUnsafeCategory(cond.id)}
-                    className={`p-2.5 rounded-xl border text-left text-xs font-bold transition-all cursor-pointer ${
-                      unsafeCategory === cond.id
-                        ? "bg-rose-50 border-rose-500 text-rose-800 shadow-2xs"
-                        : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
-                    }`}
-                  >
-                    {cond.label}
-                  </button>
-                ))}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-5xl mx-auto items-start">
+          {/* LEFT COLUMN: Field Safety Alert Form (6 cols) */}
+          <div className="lg:col-span-6 bg-white rounded-3xl p-6 sm:p-8 border border-slate-200 shadow-2xs flex flex-col gap-6">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center shrink-0">
+                <AlertOctagon className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-slate-900">Field Safety & Incident Alert</h3>
+                <p className="text-xs text-slate-500">
+                  Immediately report unsafe physical conditions, traffic hazards, or structural risks to the Municipal Dispatch Desk.
+                </p>
               </div>
             </div>
 
-            <div>
-              <label className="text-xs font-extrabold text-slate-700 block mb-1.5">Condition Details & Urgency</label>
-              <textarea
-                value={unsafeNotes}
-                onChange={(e) => setUnsafeNotes(e.target.value)}
-                placeholder="Explain the safety impediment preventing work or endangering crew..."
-                rows={3}
-                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-hidden focus:border-blue-500"
-                required
-              />
+            {unsafeSuccess && (
+              <div className="p-4 bg-emerald-50 border border-emerald-300 text-emerald-800 rounded-2xl text-xs font-bold flex items-center gap-2">
+                <CheckCircle className="w-4 h-4" />
+                <span>Safety alert broadcasted to Municipal Command Center! Dispatch has been notified.</span>
+              </div>
+            )}
+
+            <form onSubmit={handleReportUnsafe} className="flex flex-col gap-4">
+              <div>
+                <label className="text-xs font-extrabold text-slate-700 block mb-1.5">Associated Incident</label>
+                <select
+                  value={selectedTask?.id || ""}
+                  onChange={(e) => {
+                    const t = reports.find(r => r.id === e.target.value);
+                    setSelectedTask(t || null);
+                  }}
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-hidden focus:border-blue-500 cursor-pointer"
+                  required
+                >
+                  <option value="">-- Select Incident Site --</option>
+                  {assignedReports.map(t => (
+                    <option key={t.id} value={t.id}>
+                      [{t.id.slice(-6).toUpperCase()}] {t.title} - {t.location || "Delhi NCR"}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-extrabold text-slate-700 block mb-1.5">Hazard Condition Type</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { id: "TRAFFIC_RISK", label: "High Speed Traffic / No Barrier" },
+                    { id: "LIVE_WIRE", label: "Live Electrical Wire Exposed" },
+                    { id: "STRUCTURAL_COLLAPSE", label: "Structural Collapse Hazard" },
+                    { id: "TOXIC_SPILL", label: "Chemical / Sewage Spill" },
+                    { id: "WEATHER_RISK", label: "Adverse Weather / Flash Flood" },
+                    { id: "BYSTANDER_INTERFERENCE", label: "Hostile Crowds / Interference" }
+                  ].map(cond => (
+                    <button
+                      key={cond.id}
+                      type="button"
+                      onClick={() => setUnsafeCategory(cond.id)}
+                      className={`p-2.5 rounded-xl border text-left text-xs font-bold transition-all cursor-pointer ${
+                        unsafeCategory === cond.id
+                          ? "bg-rose-50 border-rose-500 text-rose-800 shadow-2xs"
+                          : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
+                      }`}
+                    >
+                      {cond.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-extrabold text-slate-700 block mb-1.5">Condition Details & Urgency</label>
+                <textarea
+                  value={unsafeNotes}
+                  onChange={(e) => setUnsafeNotes(e.target.value)}
+                  placeholder="Explain the safety impediment preventing work or endangering crew..."
+                  rows={3}
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-hidden focus:border-blue-500"
+                  required
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={unsafeSubmitting || !selectedTask}
+                className="w-full py-3 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                <AlertTriangle className="w-4 h-4" />
+                <span>{unsafeSubmitting ? "Transmitting Alert..." : "Broadcast Safety Alert to Command Center"}</span>
+              </button>
+            </form>
+          </div>
+
+          {/* RIGHT COLUMN: Emergency SOS Suite (6 cols) */}
+          <div className="lg:col-span-6 flex flex-col gap-6 w-full">
+            {/* EMERGENCY SOS FORM CARD */}
+            <div className="bg-red-50/50 border border-red-200 rounded-3xl p-6 sm:p-8 flex flex-col gap-5 text-left">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-red-600 text-white flex items-center justify-center shadow-lg animate-pulse shrink-0">
+                  <Radio className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-red-900">Life-Threatening Emergency SOS</h3>
+                  <p className="text-xs text-red-700">
+                    Instantly broadcast high-priority SOS rescue beacons with live telemetry coords.
+                  </p>
+                </div>
+              </div>
+
+              {sosSuccess && (
+                <div className="p-4 bg-emerald-50 border border-emerald-300 text-emerald-800 rounded-2xl text-xs font-bold flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-emerald-600" />
+                  <span>CRITICAL BEACON BROADCASTED! Emergency Response teams have been dispatched to your GPS coordinates.</span>
+                </div>
+              )}
+
+              <div className="flex flex-col gap-4">
+                {/* Live GPS Telemetry Indicator */}
+                <div className="bg-white/80 p-3 rounded-2xl border border-red-200 flex items-center justify-between text-xs text-red-950 font-bold font-mono">
+                  <div className="flex items-center gap-2">
+                    <span className="relative flex h-2.5 w-2.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-600"></span>
+                    </span>
+                    <span>LIVE GPS TRANSMITTER</span>
+                  </div>
+                  <span>{crewLocation.latitude.toFixed(5)}°N, {crewLocation.longitude.toFixed(5)}°E</span>
+                </div>
+
+                <div>
+                  <label className="text-xs font-extrabold text-red-900 block mb-1.5">Emergency Incident Type</label>
+                  <select
+                    value={sosType}
+                    onChange={(e) => setSosType(e.target.value)}
+                    className="w-full p-3 bg-white border border-red-200 rounded-xl text-xs font-bold focus:outline-hidden focus:border-red-500 cursor-pointer text-red-950"
+                  >
+                    <option value="CRITICAL_INJURY">🚨 Medical / Personal Injury</option>
+                    <option value="TRAFFIC_COLLISION">💥 Vehicle / Traffic Accident</option>
+                    <option value="SECURITY_THREAT">⚔️ Hostile Threat / Security Alert</option>
+                    <option value="STRUCTURAL_FAIL">🏗️ Massive Structural Failure</option>
+                    <option value="FIRE_ALERT">🔥 Active Fire / Combustion</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-extrabold text-red-900 block mb-1.5">Emergency Details</label>
+                  <textarea
+                    value={sosNotes}
+                    onChange={(e) => setSosNotes(e.target.value)}
+                    placeholder="Provide details about the crisis (e.g. number of crew affected, injuries, active hazards)..."
+                    rows={3}
+                    className="w-full p-3 bg-white border border-red-200 rounded-xl text-xs font-medium focus:outline-hidden focus:border-red-500 text-red-950"
+                    required
+                  />
+                </div>
+
+                {/* BIG RED SOS BUTTON */}
+                <button
+                  type="button"
+                  onClick={handleSendEmergencySOS}
+                  disabled={isSubmittingSos || !sosNotes.trim()}
+                  className="w-full py-4.5 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-black rounded-2xl shadow-xl hover:shadow-2xl transition-all cursor-pointer flex items-center justify-center gap-3 animate-pulse border-2 border-white/40"
+                >
+                  <AlertTriangle className="w-5 h-5 animate-bounce" />
+                  <span>{isSubmittingSos ? "TRANSMITTING BEACON..." : "TRIGGER CRITICAL SOS BEACON"}</span>
+                </button>
+              </div>
             </div>
 
-            <button
-              type="submit"
-              disabled={unsafeSubmitting || !selectedTask}
-              className="w-full py-3 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              <AlertTriangle className="w-4 h-4" />
-              <span>{unsafeSubmitting ? "Transmitting Alert..." : "Broadcast Safety Alert to Command Center"}</span>
-            </button>
-          </form>
+            {/* EMERGENCY CONTACT PHONE RASTER */}
+            <div className="bg-white border border-slate-200 rounded-3xl p-6 flex flex-col gap-4 text-left">
+              <div>
+                <h4 className="font-extrabold text-sm text-slate-800">Sovereign Crisis Helplines (NCR Hub)</h4>
+                <p className="text-xs text-slate-500 mt-0.5">Click any direct hotline to immediately patch voice channel.</p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                {[
+                  { label: "Police National Direct", phone: "100", icon: ShieldAlert },
+                  { label: "Ambulance / Medical", phone: "102", icon: UserCheck },
+                  { label: "Highway Helpline Direct", phone: "1033", icon: Compass },
+                  { label: "Disaster Management", phone: "108", icon: AlertOctagon },
+                  { label: "Fire Service Direct", phone: "101", icon: Radio },
+                  { label: "Women's Safety Rescue", phone: "1091", icon: Users },
+                ].map(line => {
+                  const LineIcon = line.icon;
+                  return (
+                    <a
+                      key={line.phone}
+                      href={`tel:${line.phone}`}
+                      className="flex items-center gap-3 p-3 bg-slate-50 hover:bg-red-50 hover:text-red-900 border border-slate-200 hover:border-red-200 rounded-2xl transition-all group font-bold text-slate-700"
+                    >
+                      <div className="w-8 h-8 rounded-xl bg-white group-hover:bg-red-100 flex items-center justify-center shrink-0 border border-slate-100 group-hover:border-red-200 text-slate-400 group-hover:text-red-600 shadow-3xs">
+                        <LineIcon className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <span className="block text-[10px] text-slate-400 group-hover:text-red-700 truncate">{line.label}</span>
+                        <span className="text-xs font-mono font-black">{line.phone}</span>
+                      </div>
+                    </a>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

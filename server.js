@@ -1,45 +1,32 @@
+// server.ts
 import express from "express";
-import type { Request, Response, NextFunction } from "express";
 import path from "path";
 import fs from "fs";
-import crypto from "crypto";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { initializeApp, getApps } from "firebase/app";
-import type { FirebaseApp } from "firebase/app";
 import { getAuth, signInWithEmailAndPassword } from "firebase/auth";
-import { 
-  initializeFirestore, 
-  collection, 
-  getDocs, 
-  doc, 
-  setDoc, 
-  updateDoc, 
-  deleteDoc, 
+import {
+  initializeFirestore,
+  collection,
+  getDocs,
+  doc,
+  setDoc,
+  updateDoc,
+  deleteDoc,
   setLogLevel
 } from "firebase/firestore";
-import type { Firestore } from "firebase/firestore";
 import dotenv from "dotenv";
-
 dotenv.config();
-
-// Suppress Firestore gRPC idle stream cancellation messages in console
 try {
   setLogLevel("silent");
 } catch (e) {
-  // Silent fallback
 }
-
-// ===================================================
-// FIREBASE INITIALIZATION & CANONICAL DATA STORE
-// ===================================================
-
-let firestoreDb: Firestore | null = null;
-const configPath = path.join(process.cwd(), "firebase-applet-config.json");
-
-let serverApp: FirebaseApp | null = null;
+var firestoreDb = null;
+var configPath = path.join(process.cwd(), "firebase-applet-config.json");
+var serverApp = null;
 if (fs.existsSync(configPath)) {
   try {
     const firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
@@ -54,86 +41,12 @@ if (fs.existsSync(configPath)) {
 } else {
   console.log("[Firebase] firebase-applet-config.json not detected. Running with in-memory resilient storage.");
 }
-
-// In-memory resilient cache to guarantee zero-downtime and ultra-fast responses
-interface AIAnalysis {
-  category: string;
-  severityScore: number;
-  riskLevel: "Low" | "Medium" | "High";
-  confidence: number;
-  description: string;
-  recommendedActions: string[];
-}
-
-interface Report {
-  id: string;
-  userId?: string;
-  title: string;
-  description: string;
-  category: "Pothole" | "Garbage Overflow" | "Broken Streetlight" | "Road Obstruction" | "Vandals / Graffiti" | "Other";
-  issueType?: string;
-  severity: number;
-  riskLevel: "Low" | "Medium" | "High";
-  priority?: "Low" | "Medium" | "High" | "Critical";
-  confidence: number;
-  status: "Pending" | "Assigned" | "In Progress" | "Resolved";
-  location: string;
-  latitude: number;
-  longitude: number;
-  image: string | null;
-  evidenceUrl?: string | null;
-  reporterEmail: string;
-  reporterName?: string;
-  assignedTo: string | null;
-  source?: "MANUAL_REPORT" | "ROAD_SCANNER";
-  roadScanId?: string | null;
-  clusterCount?: number;
-  evidenceFrames?: string[];
-  boundingBox?: { x: number; y: number; width: number; height: number } | null;
-  sourceCamera?: "Vehicle Dashcam" | "Phone Camera" | "Recorded Video" | "Demo Video";
-  estimatedWidth?: string | null;
-  estimatedLength?: string | null;
-  estimatedArea?: string | null;
-  sizeConfidence?: "High" | "Medium" | "Low" | "Unavailable" | null;
-  observationsCount?: number;
-  lastSeen?: string;
-  workflowState?: "AI DETECTED" | "AI VERIFIED" | "AUTO REPORTED" | "MUNICIPAL QUEUED" | "ASSIGNED" | "IN PROGRESS" | "RESOLVED";
-  autoReported?: boolean;
-  createdAt: string;
-  updatedAt: string;
-  aiAnalysis: AIAnalysis | null;
-}
-
-interface NotificationItem {
-  id: string;
-  recipientEmail: string;
-  recipientRole: "citizen" | "admin" | "municipal" | "field_team" | "all";
-  title: string;
-  message: string;
-  type: "report_status" | "report_submitted" | "alert_high_severity" | "system";
-  reportId: string;
-  read: boolean;
-  createdAt: string;
-}
-
-interface HistoryItem {
-  id: string;
-  reportId: string;
-  status: string;
-  updatedBy: string;
-  comment: string;
-  createdAt: string;
-}
-
-// In-Memory Seed Dataset for seamless offline and immediate preview rendering
-const inMemoryStore = {
-  reports: new Map<string, Report>(),
-  notifications: new Map<string, NotificationItem>(),
-  history: new Map<string, HistoryItem>()
+var inMemoryStore = {
+  reports: /* @__PURE__ */ new Map(),
+  notifications: /* @__PURE__ */ new Map(),
+  history: /* @__PURE__ */ new Map()
 };
-
-// Seed initial reports
-const initialSeedReports: Report[] = [
+var initialSeedReports = [
   {
     id: "REP-9021",
     userId: "user_cit_01",
@@ -153,8 +66,8 @@ const initialSeedReports: Report[] = [
     reporterEmail: "citizen@urbanpulse.ai",
     assignedTo: null,
     source: "MANUAL_REPORT",
-    createdAt: new Date(Date.now() - 3600000 * 4).toISOString(),
-    updatedAt: new Date(Date.now() - 3600000 * 4).toISOString(),
+    createdAt: new Date(Date.now() - 36e5 * 4).toISOString(),
+    updatedAt: new Date(Date.now() - 36e5 * 4).toISOString(),
     aiAnalysis: {
       category: "Pothole",
       severityScore: 88,
@@ -187,8 +100,8 @@ const initialSeedReports: Report[] = [
     reporterEmail: "citizen@urbanpulse.ai",
     assignedTo: "Electrical Crew Unit #4",
     source: "MANUAL_REPORT",
-    createdAt: new Date(Date.now() - 3600000 * 12).toISOString(),
-    updatedAt: new Date(Date.now() - 3600000 * 2).toISOString(),
+    createdAt: new Date(Date.now() - 36e5 * 12).toISOString(),
+    updatedAt: new Date(Date.now() - 36e5 * 2).toISOString(),
     aiAnalysis: {
       category: "Broken Streetlight",
       severityScore: 68,
@@ -221,8 +134,8 @@ const initialSeedReports: Report[] = [
     reporterEmail: "citizen@urbanpulse.ai",
     assignedTo: "Sanitation Compactor Team B",
     source: "MANUAL_REPORT",
-    createdAt: new Date(Date.now() - 3600000 * 18).toISOString(),
-    updatedAt: new Date(Date.now() - 3600000 * 8).toISOString(),
+    createdAt: new Date(Date.now() - 36e5 * 18).toISOString(),
+    updatedAt: new Date(Date.now() - 36e5 * 8).toISOString(),
     aiAnalysis: {
       category: "Garbage Overflow",
       severityScore: 62,
@@ -249,16 +162,16 @@ const initialSeedReports: Report[] = [
     confidence: 92,
     status: "Pending",
     location: "NH-48 Corridor Westbound",
-    latitude: 28.4900,
-    longitude: 77.0850,
+    latitude: 28.49,
+    longitude: 77.085,
     image: "https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?w=600&auto=format&fit=crop&q=80",
     reporterEmail: "scanner@urbanpulse.ai",
     assignedTo: null,
     source: "ROAD_SCANNER",
     roadScanId: "scan_seed_01",
     clusterCount: 3,
-    createdAt: new Date(Date.now() - 3600000 * 2).toISOString(),
-    updatedAt: new Date(Date.now() - 3600000 * 2).toISOString(),
+    createdAt: new Date(Date.now() - 36e5 * 2).toISOString(),
+    updatedAt: new Date(Date.now() - 36e5 * 2).toISOString(),
     aiAnalysis: {
       category: "Pothole",
       severityScore: 76,
@@ -273,13 +186,9 @@ const initialSeedReports: Report[] = [
     }
   }
 ];
-
-// Populate in-memory store ONLY if dev seeds explicitly enabled
 if (process.env.NODE_ENV === "development" && process.env.ENABLE_DEV_SEEDS === "true") {
-  initialSeedReports.forEach(r => inMemoryStore.reports.set(r.id, r));
+  initialSeedReports.forEach((r) => inMemoryStore.reports.set(r.id, r));
 }
-
-// Initialize Firestore seeds asynchronously ONLY in dev mode if explicitly enabled
 async function bootstrapFirestoreSeeds() {
   if (!firestoreDb || !serverApp) return;
   if (process.env.NODE_ENV !== "development" || process.env.ENABLE_DEV_SEEDS !== "true") return;
@@ -292,7 +201,6 @@ async function bootstrapFirestoreSeeds() {
       console.warn("[Firebase] Server authentication failed:", authErr);
       return;
     }
-
     const snap = await getDocs(collection(firestoreDb, "reports"));
     if (snap.empty) {
       console.log("[Firestore] Seeding initial canonical reports into Firestore...");
@@ -301,31 +209,25 @@ async function bootstrapFirestoreSeeds() {
       }
       console.log("[Firestore] Canonical reports successfully seeded.");
     }
-  } catch (err: any) {
+  } catch (err) {
     if (err?.code !== "permission-denied") {
       console.warn("[Firestore] Bootstrap seeding note:", err);
     }
   }
 }
-
-// ===================================================
-// SECURE GEMINI AI INITIALIZATION
-// ===================================================
-
-let ai: GoogleGenAI | null = null;
-
-function getGeminiClient(): GoogleGenAI | null {
+var ai = null;
+function getGeminiClient() {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey || apiKey === "YOUR_GEMINI_API_KEY" || apiKey.trim().length === 0) {
     return null;
   }
   if (!ai) {
     try {
-      ai = new GoogleGenAI({ 
+      ai = new GoogleGenAI({
         apiKey,
         httpOptions: {
           headers: {
-            'User-Agent': 'aistudio-build',
+            "User-Agent": "aistudio-build"
           }
         }
       });
@@ -337,19 +239,10 @@ function getGeminiClient(): GoogleGenAI | null {
   }
   return ai;
 }
-
-// Initial attempt to bind client
 getGeminiClient();
-
-// Authoritative Road Scanner & Guardian AI Gemini Model Configuration
-const ROAD_SCANNER_GEMINI_MODEL = process.env.ROAD_SCANNER_GEMINI_MODEL || "gemini-3.1-flash-lite";
-const GEMINI_FRAME_BATCH_SIZE = 4;
-const MAX_GEMINI_REQUESTS_PER_SCAN = 3;
-
-// Model cooldown cache to prevent bombarding rate-limited / quota-exhausted models
-const modelCooldownMap = new Map<string, number>();
-
-function isModelInCooldown(model: string): boolean {
+var ROAD_SCANNER_GEMINI_MODEL = process.env.ROAD_SCANNER_GEMINI_MODEL || "gemini-3.1-flash-lite";
+var modelCooldownMap = /* @__PURE__ */ new Map();
+function isModelInCooldown(model) {
   const expiry = modelCooldownMap.get(model);
   if (!expiry) return false;
   if (Date.now() > expiry) {
@@ -358,31 +251,17 @@ function isModelInCooldown(model: string): boolean {
   }
   return true;
 }
-
-function setModelCooldown(model: string, durationMs: number = 60000) {
+function setModelCooldown(model, durationMs = 6e4) {
   modelCooldownMap.set(model, Date.now() + durationMs);
 }
-
-// Multi-Model Fallback Engine & Error Classification
-function sanitizeErrorMessage(msg: string): string {
+function sanitizeErrorMessage(msg) {
   if (!msg) return "Unknown AI processing exception";
-  return String(msg)
-    .replace(/key=[A-Za-z0-9_-]+/gi, "key=[REDACTED]")
-    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [REDACTED]")
-    .replace(/x-goog-api-key:[^\s]+/gi, "x-goog-api-key: [REDACTED]")
-    .replace(/AIzaSy[A-Za-z0-9_-]{33}/gi, "[REDACTED_API_KEY]");
+  return String(msg).replace(/key=[A-Za-z0-9_-]+/gi, "key=[REDACTED]").replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [REDACTED]").replace(/x-goog-api-key:[^\s]+/gi, "x-goog-api-key: [REDACTED]").replace(/AIzaSy[A-Za-z0-9_-]{33}/gi, "[REDACTED_API_KEY]");
 }
-
-function classifyGeminiError(err: any, fallbackModel: string = ROAD_SCANNER_GEMINI_MODEL): { 
-  errorState: string; 
-  httpStatus: number; 
-  message: string;
-  attemptedModel: string;
-} {
+function classifyGeminiError(err, fallbackModel = ROAD_SCANNER_GEMINI_MODEL) {
   const errMsg = sanitizeErrorMessage(err?.message || String(err));
   const status = Number(err?.status || err?.statusCode || err?.code) || 500;
   const attemptedModel = err?.attemptedModel || fallbackModel;
-
   if (status === 401 || status === 403 || errMsg.includes("API_KEY") || errMsg.includes("UNAUTHENTICATED") || errMsg.includes("API key not valid") || errMsg.includes("PermissionDenied")) {
     return { errorState: "GEMINI_AUTH_ERROR", httpStatus: status === 500 ? 401 : status, message: errMsg || "Gemini API configuration is missing or authentication failed.", attemptedModel };
   }
@@ -395,21 +274,13 @@ function classifyGeminiError(err: any, fallbackModel: string = ROAD_SCANNER_GEMI
   if (status === 400 || errMsg.includes("INVALID_ARGUMENT") || errMsg.includes("bad request")) {
     return { errorState: "GEMINI_INVALID_REQUEST", httpStatus: 400, message: errMsg || "Invalid image payload or request parameters.", attemptedModel };
   }
-
   return { errorState: "GEMINI_REQUEST_ERROR", httpStatus: status, message: errMsg || "Gemini vision API request failed.", attemptedModel };
 }
-
-async function generateContentWithFallback(
-  aiClient: GoogleGenAI, 
-  params: any,
-  preferredModel: string = ROAD_SCANNER_GEMINI_MODEL
-): Promise<{ response: any; modelUsed: string }> {
-  // Authoritative models ordered by speed, capability, and availability: gemini-3.1-flash-lite -> gemini-flash-latest -> gemini-3.8-flash
-  const candidateModels = Array.from(new Set([preferredModel, "gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.8-flash"]));
-  const availableModels = candidateModels.filter(m => !isModelInCooldown(m));
+async function generateContentWithFallback(aiClient, params, preferredModel = ROAD_SCANNER_GEMINI_MODEL) {
+  const candidateModels = Array.from(/* @__PURE__ */ new Set([preferredModel, "gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.8-flash"]));
+  const availableModels = candidateModels.filter((m) => !isModelInCooldown(m));
   const models = availableModels.length > 0 ? availableModels : candidateModels.slice(0, 1);
-  let lastError: any = null;
-
+  let lastError = null;
   for (const model of models) {
     try {
       const reqPayload = { ...params, model };
@@ -420,7 +291,7 @@ async function generateContentWithFallback(
         console.log(`[Diagnostic] Gemini response received from ${model} in ${Date.now() - startMs}ms`);
         return { response, modelUsed: model };
       }
-    } catch (err: any) {
+    } catch (err) {
       lastError = err;
       if (err && typeof err === "object") {
         err.attemptedModel = model;
@@ -428,136 +299,91 @@ async function generateContentWithFallback(
       const errMsg = sanitizeErrorMessage(err?.message || String(err));
       const status = Number(err?.status || err?.statusCode || err?.code) || 0;
       const isRateLimit = status === 429 || errMsg.includes("429") || errMsg.includes("RESOURCE_EXHAUSTED") || errMsg.includes("Quota exceeded");
-      
       if (isRateLimit) {
-        setModelCooldown(model, 60000);
+        setModelCooldown(model, 6e4);
         console.log(`[Gemini AI] Model ${model} rate limit/quota reached. Cooling down 60s, switching to next model.`);
       } else {
         console.log(`[Gemini AI] Model ${model} error: ${errMsg.slice(0, 120)}`);
       }
     }
   }
-
   throw lastError || new Error("All Gemini model attempts exhausted.");
 }
-
-// ===================================================
-// EXPRESS SERVER & SECURITY HARDENING MIDDLEWARE
-// ===================================================
-
-const app = express();
-const PORT = Number(process.env.PORT) || 3000;
-
-// Trust reverse proxy (Cloud Run / Nginx) to accurately process X-Forwarded-For headers
+var app = express();
+var PORT = Number(process.env.PORT) || 3e3;
 app.set("trust proxy", 1);
-
-// 1. Security Headers with Helmet (Configured for Cloud Run & AI Studio Iframe Preview)
 app.disable("x-powered-by");
 app.use(
   helmet({
-    contentSecurityPolicy: false, // Allow inline styles & Leaflet map tiles
+    contentSecurityPolicy: false,
+    // Allow inline styles & Leaflet map tiles
     crossOriginEmbedderPolicy: false,
     crossOriginOpenerPolicy: false,
     crossOriginResourcePolicy: false,
-    frameguard: false, // Crucial: Allow AI Studio iframe preview without SAMEORIGIN blocking
+    frameguard: false,
+    // Crucial: Allow AI Studio iframe preview without SAMEORIGIN blocking
     originAgentCluster: false
   })
 );
-
-app.use((req: Request, res: Response, next: NextFunction) => {
+app.use((req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-XSS-Protection", "1; mode=block");
   res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
   next();
 });
-
-// 2. API Rate Limiting Guards
-const generalLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 180, // Limit each IP to 180 requests per minute
+var generalLimiter = rateLimit({
+  windowMs: 60 * 1e3,
+  // 1 minute
+  max: 180,
+  // Limit each IP to 180 requests per minute
   standardHeaders: true,
   legacyHeaders: false,
   validate: { xForwardedForHeader: false },
   message: { error: "Too many requests from this IP. Please try again shortly." }
 });
-
-const aiLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 60, // Limit each IP to 60 AI calls per minute
+var aiLimiter = rateLimit({
+  windowMs: 60 * 1e3,
+  // 1 minute
+  max: 60,
+  // Limit each IP to 60 AI calls per minute
   standardHeaders: true,
   legacyHeaders: false,
   validate: { xForwardedForHeader: false },
   message: { error: "AI query rate limit reached. Please wait a moment before sending more messages." }
 });
-
 app.use("/api/", generalLimiter);
 app.use("/api/ai", aiLimiter);
 app.use("/api/copilot", aiLimiter);
-
-// 3. Body parsers with safe limits for base64 hazard images
 app.use(express.json({ limit: "15mb" }));
 app.use(express.urlencoded({ limit: "15mb", extended: true }));
-
-// Helper UUID generator
-function generateUUID(): string {
-  return crypto.randomUUID();
-}
-
-// Input & Script Tag Sanitizer (XSS Prevention)
-function sanitizeText(input: any, maxLen: number = 3000): string {
+function sanitizeText(input, maxLen = 3e3) {
   if (typeof input !== "string") return "";
-  return input
-    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
-    .replace(/javascript:/gi, "")
-    .replace(/onload=/gi, "")
-    .replace(/onerror=/gi, "")
-    .trim()
-    .substring(0, maxLen);
+  return input.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "").replace(/javascript:/gi, "").replace(/onload=/gi, "").replace(/onerror=/gi, "").trim().substring(0, maxLen);
 }
-
-// Coordinate & Input Sanitizer
-function sanitizeCoordinate(val: any, fallback: number, min: number, max: number): number {
-  const num = typeof val === "number" ? val : parseFloat(val);
-  if (isNaN(num) || !isFinite(num) || num < min || num > max) {
-    return fallback;
-  }
-  return num;
-}
-
-// ===================================================
-// REST API ROUTES (CANONICAL FIRESTORE INTEGRATION)
-// ===================================================
-
-// Lightweight Health Check for Cloud Run Readiness/Liveness probe
-app.get("/health", (req: Request, res: Response) => {
+app.get("/health", (req, res) => {
   res.json({ status: "ok" });
 });
-
-// Health Check
-app.get("/api/health", (req: Request, res: Response) => {
+app.get("/api/health", (req, res) => {
   res.json({
     status: "ok",
     service: "UrbanPulse Guardian AI Engine",
-    timestamp: new Date().toISOString(),
+    timestamp: (/* @__PURE__ */ new Date()).toISOString(),
     firestoreConnected: Boolean(firestoreDb),
     aiEngineActive: Boolean(ai)
   });
 });
-
-// 1. GET ALL REPORTS
-app.get("/api/reports", async (req: Request, res: Response) => {
+app.get("/api/reports", async (req, res) => {
   try {
-    let reportsList: Report[] = [];
-
+    let reportsList = [];
     if (firestoreDb) {
       try {
         const snap = await getDocs(collection(firestoreDb, "reports"));
-        reportsList = snap.docs.map(doc => {
-          const data = doc.data();
+        reportsList = snap.docs.map((doc2) => {
+          const data = doc2.data();
           const latVal = typeof data.latitude === "number" && !isNaN(data.latitude) ? data.latitude : null;
           const lngVal = typeof data.longitude === "number" && !isNaN(data.longitude) ? data.longitude : null;
           return {
-            id: doc.id,
+            id: doc2.id,
             userId: data.userId || "",
             title: data.title || "Hazard Report",
             description: data.description || "",
@@ -579,86 +405,72 @@ app.get("/api/reports", async (req: Request, res: Response) => {
             roadScanId: data.roadScanId || null,
             clusterCount: data.clusterCount ?? 1,
             evidenceFrames: data.evidenceFrames || [],
-            createdAt: data.createdAt || new Date().toISOString(),
-            updatedAt: data.updatedAt || new Date().toISOString(),
+            createdAt: data.createdAt || (/* @__PURE__ */ new Date()).toISOString(),
+            updatedAt: data.updatedAt || (/* @__PURE__ */ new Date()).toISOString(),
             aiAnalysis: data.aiAnalysis || null
           };
         });
-
-        // Sync into memory store cache
-        reportsList.forEach(r => inMemoryStore.reports.set(r.id, r));
-
-        // Sort latest first
+        reportsList.forEach((r) => inMemoryStore.reports.set(r.id, r));
         reportsList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         return res.json({ reports: reportsList });
-
-      } catch (firestoreErr: any) {
+      } catch (firestoreErr) {
         const errMsg = firestoreErr?.message || String(firestoreErr);
         if (!errMsg.includes("Quota limit exceeded") && !errMsg.includes("Quota exceeded") && !errMsg.includes("resource-exhausted")) {
           console.warn("[Firestore] Read reports fallback notice:", errMsg);
         }
-        const memList = Array.from(inMemoryStore.reports.values());
-        memList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        return res.json({ reports: memList });
+        const memList2 = Array.from(inMemoryStore.reports.values());
+        memList2.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        return res.json({ reports: memList2 });
       }
     }
-
-    // Fallback if firestoreDb not initialized
     const memList = Array.from(inMemoryStore.reports.values());
     memList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     res.json({ reports: memList });
-  } catch (err: any) {
+  } catch (err) {
     console.error("GET /api/reports failed:", err);
     res.status(500).json({ error: "Failed to retrieve incident reports." });
   }
 });
-
-// 2. CREATE REPORT (POST /api/reports & POST /api/reports/create)
-const handleCreateReport = async (req: Request, res: Response) => {
+var handleCreateReport = async (req, res) => {
   try {
-    const { 
-      title, 
-      description, 
-      category, 
-      severity, 
-      riskLevel, 
-      confidence, 
-      status, 
-      location, 
-      latitude, 
-      longitude, 
-      image, 
-      reporterEmail, 
-      source, 
-      roadScanId, 
-      clusterCount, 
-      evidenceFrames, 
-      aiAnalysis 
+    const {
+      title,
+      description,
+      category,
+      severity,
+      riskLevel,
+      confidence,
+      status,
+      location,
+      latitude,
+      longitude,
+      image,
+      reporterEmail,
+      source,
+      roadScanId,
+      clusterCount,
+      evidenceFrames,
+      aiAnalysis
     } = req.body;
-
     if (!title || typeof title !== "string" || !title.trim()) {
       return res.status(400).json({ error: "Report title is required." });
     }
-
     const reportId = req.body.id || `REP-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`;
-    const nowStr = new Date().toISOString();
-
+    const nowStr = (/* @__PURE__ */ new Date()).toISOString();
     const lat = typeof latitude === "number" && !isNaN(latitude) ? latitude : null;
     const lng = typeof longitude === "number" && !isNaN(longitude) ? longitude : null;
-
     const validCategory = category || "Pothole";
     const validSeverity = typeof severity === "number" ? Math.max(0, Math.min(100, severity)) : 65;
     const validRisk = riskLevel || (validSeverity >= 75 ? "High" : validSeverity >= 45 ? "Medium" : "Low");
     const validPriority = validSeverity >= 85 ? "Critical" : validSeverity >= 70 ? "High" : validSeverity >= 40 ? "Medium" : "Low";
     const validConfidence = typeof confidence === "number" ? Math.max(0, Math.min(100, confidence)) : 90;
-
-    const newReport: Report = {
+    const newReport = {
       id: reportId,
       userId: req.body.userId || "user_cit_" + Date.now(),
       title: sanitizeText(title, 200),
-      description: sanitizeText(description || `Hazard report for ${title}`, 4000),
-      category: sanitizeText(validCategory, 100) as any,
-      issueType: sanitizeText(validCategory, 100) as any,
+      description: sanitizeText(description || `Hazard report for ${title}`, 4e3),
+      category: sanitizeText(validCategory, 100),
+      issueType: sanitizeText(validCategory, 100),
       severity: validSeverity,
       riskLevel: validRisk,
       priority: validPriority,
@@ -677,7 +489,7 @@ const handleCreateReport = async (req: Request, res: Response) => {
       clusterCount: clusterCount || 1,
       evidenceFrames: evidenceFrames || [],
       boundingBox: req.body.boundingBox || null,
-      sourceCamera: req.body.sourceCamera || (source === "ROAD_SCANNER" ? "Vehicle Dashcam" : undefined),
+      sourceCamera: req.body.sourceCamera || (source === "ROAD_SCANNER" ? "Vehicle Dashcam" : void 0),
       estimatedWidth: req.body.estimatedWidth || null,
       estimatedLength: req.body.estimatedLength || null,
       estimatedArea: req.body.estimatedArea || null,
@@ -700,50 +512,36 @@ const handleCreateReport = async (req: Request, res: Response) => {
         ]
       }
     };
-
-    // Save to in-memory store
     inMemoryStore.reports.set(reportId, newReport);
-
-    // Save notification
     const notifId = `notif_${Date.now()}`;
-    const newNotif: NotificationItem = {
+    const newNotif = {
       id: notifId,
       recipientEmail: reporterEmail || "citizen@urbanpulse.ai",
       recipientRole: "citizen",
       title: `Report Registered: ${validCategory}`,
       message: `Your report '${newReport.title}' has been logged (Severity: ${validSeverity}%). Municipal teams notified.`,
       type: "report_submitted",
-      reportId: reportId,
+      reportId,
       read: false,
       createdAt: nowStr
     };
     inMemoryStore.notifications.set(notifId, newNotif);
-    
-    // Create notification for Municipal
     const muniNotifId = `notif_muni_${Date.now()}`;
     const isHighSeverity = validSeverity >= 80;
     const isRoadScanner = newReport.source === "ROAD_SCANNER";
-    
-    const muniNotif: NotificationItem = {
+    const muniNotif = {
       id: muniNotifId,
-      recipientEmail: "", // target all municipal users
+      recipientEmail: "",
+      // target all municipal users
       recipientRole: "admin",
-      title: isHighSeverity 
-        ? `CRITICAL ALERT: ${validCategory}` 
-        : isRoadScanner 
-          ? `New AI Road Scanner Report`
-          : `New Citizen Report: ${validCategory}`,
-      message: isRoadScanner
-        ? `AI scanner detected ${validCategory} (${validSeverity}% severity) at ${newReport.location}`
-        : `A new report has been submitted by ${reporterEmail || 'a citizen'}. Severity: ${validSeverity}%`,
+      title: isHighSeverity ? `CRITICAL ALERT: ${validCategory}` : isRoadScanner ? `New AI Road Scanner Report` : `New Citizen Report: ${validCategory}`,
+      message: isRoadScanner ? `AI scanner detected ${validCategory} (${validSeverity}% severity) at ${newReport.location}` : `A new report has been submitted by ${reporterEmail || "a citizen"}. Severity: ${validSeverity}%`,
       type: isHighSeverity ? "alert_high_severity" : "report_submitted",
-      reportId: reportId,
+      reportId,
       read: false,
       createdAt: nowStr
     };
     inMemoryStore.notifications.set(muniNotifId, muniNotif);
-
-    // Sync to Firestore
     if (firestoreDb) {
       try {
         await setDoc(doc(firestoreDb, "reports", reportId), newReport);
@@ -751,7 +549,7 @@ const handleCreateReport = async (req: Request, res: Response) => {
         await setDoc(doc(firestoreDb, "notifications", muniNotifId), muniNotif);
         await setDoc(doc(firestoreDb, "history", `hist_${Date.now()}`), {
           id: `hist_${Date.now()}`,
-          reportId: reportId,
+          reportId,
           status: "Pending",
           updatedBy: reporterEmail || "Citizen",
           comment: "Initial report submission logged.",
@@ -761,37 +559,30 @@ const handleCreateReport = async (req: Request, res: Response) => {
         console.warn("[Firestore] Write sync note:", firestoreErr);
       }
     }
-
     res.json({
       status: "success",
       report: newReport
     });
-  } catch (err: any) {
+  } catch (err) {
     console.error("Create report failed:", err);
     res.status(500).json({ error: "Failed to submit hazard report." });
   }
 };
-
 app.post("/api/reports/create", handleCreateReport);
 app.post("/api/reports", handleCreateReport);
-
-// 3. CREATE DIRECT PRE-ANALYZED REPORT (Judge Closed-Loop Demo)
-app.post("/api/reports/create-direct", async (req: Request, res: Response) => {
+app.post("/api/reports/create-direct", async (req, res) => {
   try {
     const reportData = req.body;
     if (!reportData || !reportData.id) {
       return res.status(400).json({ error: "Invalid report payload." });
     }
-
-    const nowStr = new Date().toISOString();
-    const finalReport: Report = {
+    const nowStr = (/* @__PURE__ */ new Date()).toISOString();
+    const finalReport = {
       ...reportData,
       createdAt: reportData.createdAt || nowStr,
       updatedAt: nowStr
     };
-
     inMemoryStore.reports.set(finalReport.id, finalReport);
-
     if (firestoreDb) {
       try {
         await setDoc(doc(firestoreDb, "reports", finalReport.id), finalReport);
@@ -799,42 +590,32 @@ app.post("/api/reports/create-direct", async (req: Request, res: Response) => {
         console.warn("[Firestore] Direct report sync note:", e);
       }
     }
-
     res.json({ status: "success", reportId: finalReport.id });
-  } catch (err: any) {
+  } catch (err) {
     console.error("Direct report insertion error:", err);
     res.status(500).json({ error: "Failed to create direct report." });
   }
 });
-
-// 4. UPDATE REPORT STATUS
-app.post("/api/reports/update-status", async (req: Request, res: Response) => {
+app.post("/api/reports/update-status", async (req, res) => {
   try {
     const { id, status, assignedTo, comment, officerName, userRole, role } = req.body;
     const requesterRole = (userRole || role || req.headers["x-user-role"] || "admin").toString().toLowerCase();
-
-    // Verify role authorization
     if (requesterRole !== "admin" && requesterRole !== "municipal") {
       return res.status(403).json({ error: "Forbidden: Only authenticated Municipal officers can update ticket status." });
     }
-
     if (!id || !status) {
       return res.status(400).json({ error: "Report ID and target status are required." });
     }
-
     const existing = inMemoryStore.reports.get(id);
-    const nowStr = new Date().toISOString();
-
+    const nowStr = (/* @__PURE__ */ new Date()).toISOString();
     if (existing) {
       existing.status = status;
-      if (assignedTo !== undefined) existing.assignedTo = assignedTo;
+      if (assignedTo !== void 0) existing.assignedTo = assignedTo;
       existing.updatedAt = nowStr;
       inMemoryStore.reports.set(id, existing);
     }
-
-    // Add notification to citizen
     const notifId = `notif_${Date.now()}`;
-    const statusNotif: NotificationItem = {
+    const statusNotif = {
       id: notifId,
       recipientEmail: existing?.reporterEmail || "citizen@urbanpulse.ai",
       recipientRole: "citizen",
@@ -846,16 +627,13 @@ app.post("/api/reports/update-status", async (req: Request, res: Response) => {
       createdAt: nowStr
     };
     inMemoryStore.notifications.set(notifId, statusNotif);
-
-    // Sync to Firestore
     if (firestoreDb) {
       try {
         await updateDoc(doc(firestoreDb, "reports", id), {
           status,
-          assignedTo: assignedTo !== undefined ? assignedTo : (existing?.assignedTo || null),
+          assignedTo: assignedTo !== void 0 ? assignedTo : existing?.assignedTo || null,
           updatedAt: nowStr
         });
-
         await setDoc(doc(firestoreDb, "history", `hist_${Date.now()}`), {
           id: `hist_${Date.now()}`,
           reportId: id,
@@ -864,7 +642,6 @@ app.post("/api/reports/update-status", async (req: Request, res: Response) => {
           comment: comment || `Status transitioned to ${status}.`,
           createdAt: nowStr
         });
-
         await setDoc(doc(firestoreDb, "municipalActions", `act_${Date.now()}`), {
           id: `act_${Date.now()}`,
           reportId: id,
@@ -874,40 +651,32 @@ app.post("/api/reports/update-status", async (req: Request, res: Response) => {
           comment: comment || "",
           createdAt: nowStr
         });
-
         await setDoc(doc(firestoreDb, "notifications", notifId), statusNotif);
       } catch (fErr) {
         console.warn("[Firestore] Status update sync note:", fErr);
       }
     }
-
     res.json({
       status: "success",
       report: existing || { id, status, updatedAt: nowStr }
     });
-  } catch (err: any) {
+  } catch (err) {
     console.error("Update report status failed:", err);
     res.status(500).json({ error: "Failed to update report status." });
   }
 });
-
-// 4B. BULK UPDATE REPORT STATUS
-app.post("/api/reports/bulk-update-status", async (req: Request, res: Response) => {
+app.post("/api/reports/bulk-update-status", async (req, res) => {
   try {
     const { reportIds, status, comment, officerName, userRole, role } = req.body;
     const requesterRole = (userRole || role || req.headers["x-user-role"] || "admin").toString().toLowerCase();
-
     if (requesterRole !== "admin" && requesterRole !== "municipal") {
       return res.status(403).json({ error: "Forbidden: Only authenticated Municipal officers can perform bulk status updates." });
     }
-
     if (!Array.isArray(reportIds) || reportIds.length === 0 || !status) {
       return res.status(400).json({ error: "Array of reportIds and status are required." });
     }
-
-    const nowStr = new Date().toISOString();
-    const updatedList: string[] = [];
-
+    const nowStr = (/* @__PURE__ */ new Date()).toISOString();
+    const updatedList = [];
     for (const id of reportIds) {
       const existing = inMemoryStore.reports.get(id);
       if (existing) {
@@ -916,7 +685,6 @@ app.post("/api/reports/bulk-update-status", async (req: Request, res: Response) 
         inMemoryStore.reports.set(id, existing);
       }
       updatedList.push(id);
-
       if (firestoreDb) {
         try {
           await updateDoc(doc(firestoreDb, "reports", id), {
@@ -928,30 +696,23 @@ app.post("/api/reports/bulk-update-status", async (req: Request, res: Response) 
         }
       }
     }
-
     res.json({ status: "success", updatedCount: updatedList.length });
-  } catch (err: any) {
+  } catch (err) {
     console.error("Bulk update report status failed:", err);
     res.status(500).json({ error: "Failed to perform bulk status update." });
   }
 });
-
-// 5. DELETE REPORT
-app.post("/api/reports/delete", async (req: Request, res: Response) => {
+app.post("/api/reports/delete", async (req, res) => {
   try {
     const { id, userRole, role } = req.body;
     const requesterRole = (userRole || role || req.headers["x-user-role"] || "admin").toString().toLowerCase();
-
     if (requesterRole !== "admin" && requesterRole !== "municipal") {
       return res.status(403).json({ error: "Forbidden: Only authenticated Municipal officers can delete reports." });
     }
-
     if (!id) {
       return res.status(400).json({ error: "Report ID is required." });
     }
-
     inMemoryStore.reports.delete(id);
-
     if (firestoreDb) {
       try {
         await deleteDoc(doc(firestoreDb, "reports", id));
@@ -959,31 +720,24 @@ app.post("/api/reports/delete", async (req: Request, res: Response) => {
         console.warn("[Firestore] Delete sync note:", fErr);
       }
     }
-
     res.json({ status: "success" });
-  } catch (err: any) {
+  } catch (err) {
     console.error("Delete report failed:", err);
     res.status(500).json({ error: "Failed to delete report." });
   }
 });
-
-// 5B. USER PROFILE ROLE VALIDATION (PREVENT ROLE ESCALATION)
-app.post("/api/users/profile", async (req: Request, res: Response) => {
+app.post("/api/users/profile", async (req, res) => {
   try {
     const { uid, email, name, role, requesterRole } = req.body;
     if (!uid || !email) {
       return res.status(400).json({ error: "UID and email are required." });
     }
-
     const currentReqRole = (requesterRole || "citizen").toString().toLowerCase();
     let assignedRole = (role || "citizen").toString().toLowerCase();
-
-    // Prevent unauthorized escalation to privileged roles (admin, municipal, field_team)
     if ((assignedRole === "admin" || assignedRole === "municipal" || assignedRole === "field_team") && currentReqRole !== "admin") {
       assignedRole = "citizen";
     }
-
-    const nowStr = new Date().toISOString();
+    const nowStr = (/* @__PURE__ */ new Date()).toISOString();
     const profileDoc = {
       uid,
       email,
@@ -992,31 +746,25 @@ app.post("/api/users/profile", async (req: Request, res: Response) => {
       role: assignedRole,
       updatedAt: nowStr
     };
-
     if (firestoreDb) {
       await setDoc(doc(firestoreDb, "users", uid), profileDoc, { merge: true });
     }
-
     res.json({ status: "success", profile: profileDoc });
-  } catch (err: any) {
+  } catch (err) {
     console.error("User profile update failed:", err);
     res.status(500).json({ error: "Failed to update user profile." });
   }
 });
-
-// 6. GET NOTIFICATIONS
-app.get("/api/notifications", async (req: Request, res: Response) => {
+app.get("/api/notifications", async (req, res) => {
   try {
-    const email = (req.query.email as string || "").toLowerCase();
-    const role = (req.query.role as string || "all").toLowerCase();
-
-    let notifList: NotificationItem[] = [];
-
+    const email = (req.query.email || "").toLowerCase();
+    const role = (req.query.role || "all").toLowerCase();
+    let notifList = [];
     if (firestoreDb) {
       try {
         const snap = await getDocs(collection(firestoreDb, "notifications"));
         if (!snap.empty) {
-          notifList = snap.docs.map(d => {
+          notifList = snap.docs.map((d) => {
             const data = d.data();
             return {
               id: d.id,
@@ -1027,96 +775,73 @@ app.get("/api/notifications", async (req: Request, res: Response) => {
               type: data.type || "report_status",
               reportId: data.reportId || "SYSTEM",
               read: Boolean(data.read ?? data.read_status),
-              createdAt: data.createdAt || new Date().toISOString()
+              createdAt: data.createdAt || (/* @__PURE__ */ new Date()).toISOString()
             };
           });
-          notifList.forEach(n => inMemoryStore.notifications.set(n.id, n));
+          notifList.forEach((n) => inMemoryStore.notifications.set(n.id, n));
         }
-      } catch (fErr: any) {
+      } catch (fErr) {
         const errMsg = fErr?.message || String(fErr);
         if (!errMsg.includes("Quota limit exceeded") && !errMsg.includes("Quota exceeded") && !errMsg.includes("resource-exhausted") && fErr?.code !== "permission-denied") {
           console.warn("[Firestore] Read notifications fallback notice:", errMsg);
         }
       }
     }
-
     if (notifList.length === 0) {
       notifList = Array.from(inMemoryStore.notifications.values());
     }
-
-    // Filter by user email/role
-    notifList = notifList.filter(n => {
+    notifList = notifList.filter((n) => {
       const notifEmail = (n.recipientEmail || "").trim().toLowerCase();
-
       if (role === "citizen") {
         return Boolean(email && notifEmail === email);
       }
-
       if (role === "field_team") {
         if (n.recipientRole === "admin" || n.recipientRole === "municipal") return false;
         if (n.recipientRole === "field_team") return true;
         if (notifEmail && email && notifEmail === email) return true;
         return false;
       }
-
       if (role === "admin" || role === "municipal") {
         if (n.recipientRole === "admin" || n.recipientRole === "municipal" || n.recipientRole === "all") return true;
         if (notifEmail && email && notifEmail === email) return true;
         return false;
       }
-
       return false;
     });
-
     notifList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
     res.json({ notifications: notifList });
-  } catch (err: any) {
+  } catch (err) {
     console.error("GET /api/notifications failed:", err);
     res.status(500).json({ error: "Failed to retrieve notifications." });
   }
 });
-
-// 7. MARK NOTIFICATIONS READ
-app.post("/api/notifications/read-all", async (req: Request, res: Response) => {
+app.post("/api/notifications/read-all", async (req, res) => {
   try {
     const { email } = req.body;
     const targetEmail = (email || "").toLowerCase();
-
-    inMemoryStore.notifications.forEach(n => {
+    inMemoryStore.notifications.forEach((n) => {
       if (!targetEmail || n.recipientEmail.toLowerCase() === targetEmail) {
         n.read = true;
       }
     });
-
     res.json({ status: "success" });
-  } catch (err: any) {
+  } catch (err) {
     console.error("Mark notifications read failed:", err);
     res.status(500).json({ error: "Failed to mark notifications read." });
   }
 });
-
-// ===================================================
-// SECURE GEMINI AI ENDPOINTS
-// ===================================================
-
-// A. AI IMAGE ANALYSIS FOR CITIZEN REPORTING
-app.post("/api/ai/analyze-image", async (req: Request, res: Response) => {
+app.post("/api/ai/analyze-image", async (req, res) => {
   try {
     const { image, title, description, category, location } = req.body;
-
     console.log(`[Diagnostic] /api/ai/analyze-image request received: title="${title || "N/A"}", category="${category || "N/A"}", location="${location || "N/A"}"`);
-
     if (!image) {
       console.warn("[Diagnostic] AI image analysis rejected: No image payload provided.");
       return res.status(400).json({ error: "No image payload provided for AI analysis." });
     }
-
     const aiClient = getGeminiClient();
-
     if (aiClient) {
       try {
-        const contentsPayload: any[] = [];
+        const contentsPayload = [];
         const systemPrompt = `You are the UrbanPulse Guardian AI Infrastructure Analysis Engine.
 Analyze the provided public scene photo and determine if a legitimate urban public hazard exists.
 Valid categories: "Pothole", "Garbage Overflow", "Broken Streetlight", "Road Obstruction", "Vandals / Graffiti", "Other".
@@ -1138,18 +863,14 @@ Respond ONLY with valid JSON matching:
   "recommendedAction": string (primary immediate action),
   "reasoning": string (1-2 sentences)
 }`;
-
-        // 1. Process Image Payload (Data URL, Remote URL, or Raw Base64)
         if (typeof image === "string" && image.startsWith("data:")) {
           const mimePattern = /^data:(image\/[a-zA-Z0-9+.-]+);base64,/;
           const match = image.match(mimePattern);
           let mimeType = match ? match[1] : "image/jpeg";
           if (mimeType === "image/jpg") mimeType = "image/jpeg";
           const base64Data = image.replace(mimePattern, "");
-          const byteLength = Math.round((base64Data.length * 3) / 4);
-
+          const byteLength = Math.round(base64Data.length * 3 / 4);
           console.log(`[Diagnostic] Image source: DATA_URL, MIME: ${mimeType}, Size: ~${byteLength} bytes`);
-
           contentsPayload.push({
             inlineData: { mimeType, data: base64Data }
           });
@@ -1168,9 +889,7 @@ Respond ONLY with valid JSON matching:
               if (mimeType.includes("image/png")) mimeType = "image/png";
               else if (mimeType.includes("image/webp")) mimeType = "image/webp";
               else mimeType = "image/jpeg";
-
               console.log(`[Diagnostic] Remote image converted to base64, buffer size: ${buffer.length} bytes, MIME: ${mimeType}`);
-
               contentsPayload.push({
                 inlineData: { mimeType, data: buffer.toString("base64") }
               });
@@ -1183,14 +902,14 @@ Respond ONLY with valid JSON matching:
                 text: `Analyze reported urban incident. Title: "${title || ""}". Description: "${description || ""}". Category: "${category || "Pothole"}". Location: "${location || ""}".`
               });
             }
-          } catch (fetchErr: any) {
+          } catch (fetchErr) {
             console.warn("[Diagnostic] Remote image fetch error:", fetchErr?.message || fetchErr);
             contentsPayload.push({
               text: `Analyze reported urban incident. Title: "${title || ""}". Description: "${description || ""}". Category: "${category || "Pothole"}". Location: "${location || ""}".`
             });
           }
         } else if (typeof image === "string" && image.length > 100) {
-          const byteLength = Math.round((image.length * 3) / 4);
+          const byteLength = Math.round(image.length * 3 / 4);
           console.log(`[Diagnostic] Image source: RAW_BASE64, Size: ~${byteLength} bytes`);
           contentsPayload.push({
             inlineData: { mimeType: "image/jpeg", data: image }
@@ -1204,7 +923,6 @@ Respond ONLY with valid JSON matching:
             text: `Context evaluation: Title: "${title || ""}". Description: "${description || ""}". Category: "${category || "Pothole"}". Location: "${location || ""}".`
           });
         }
-
         const { response, modelUsed } = await generateContentWithFallback(aiClient, {
           contents: contentsPayload,
           config: {
@@ -1212,14 +930,12 @@ Respond ONLY with valid JSON matching:
             responseMimeType: "application/json"
           }
         });
-
         let rawText = response.text || "";
         if (!rawText && response.candidates && response.candidates[0]?.content?.parts) {
-          rawText = response.candidates[0].content.parts.map((p: any) => p.text || "").join("");
+          rawText = response.candidates[0].content.parts.map((p) => p.text || "").join("");
         }
-
         const cleaned = rawText.replace(/```(?:json)?\s*([\s\S]*?)\s*```/g, "$1").trim();
-        let parsed: any = {};
+        let parsed = {};
         try {
           parsed = JSON.parse(cleaned);
         } catch (pErr) {
@@ -1230,23 +946,18 @@ Respond ONLY with valid JSON matching:
             throw new Error("Could not parse JSON output from Gemini response.");
           }
         }
-
-        const detectedIssue = parsed.issueDetected !== undefined ? Boolean(parsed.issueDetected) : (parsed.detectedIssue !== undefined ? Boolean(parsed.detectedIssue) : true);
+        const detectedIssue = parsed.issueDetected !== void 0 ? Boolean(parsed.issueDetected) : parsed.detectedIssue !== void 0 ? Boolean(parsed.detectedIssue) : true;
         const resolvedCategory = parsed.issueType || parsed.category || category || "Pothole";
         const severityScore = Number(parsed.severity ?? parsed.severityScore) || 60;
         const confidenceVal = Number(parsed.confidence) || 88;
         const descText = parsed.description || parsed.explanation || "Identified urban infrastructure hazard requiring municipal remediation.";
-        const actionsList = Array.isArray(parsed.recommendedActions) && parsed.recommendedActions.length > 0 
-          ? parsed.recommendedActions 
-          : (parsed.recommendedAction ? [parsed.recommendedAction] : ["Dispatch field inspection team", "Verify location & road clearance"]);
-
+        const actionsList = Array.isArray(parsed.recommendedActions) && parsed.recommendedActions.length > 0 ? parsed.recommendedActions : parsed.recommendedAction ? [parsed.recommendedAction] : ["Dispatch field inspection team", "Verify location & road clearance"];
         console.log(`[Diagnostic] Gemini analysis SUCCESS from ${modelUsed}: detectedIssue=${detectedIssue}, category="${resolvedCategory}", severity=${severityScore}, confidence=${confidenceVal}`);
-
         return res.json({
           status: "success",
           analysis: {
             issueDetected: detectedIssue,
-            detectedIssue: detectedIssue,
+            detectedIssue,
             issueType: resolvedCategory,
             category: resolvedCategory,
             confidence: Math.max(0, Math.min(100, confidenceVal)),
@@ -1261,18 +972,15 @@ Respond ONLY with valid JSON matching:
             source: "AI_GEMINI"
           }
         });
-      } catch (geminiErr: any) {
+      } catch (geminiErr) {
         console.warn("[Diagnostic] Gemini analysis error, invoking heuristics:", sanitizeErrorMessage(geminiErr?.message || geminiErr).slice(0, 120));
       }
     }
-
-    // Heuristic Fallback
     const combined = `${title || ""} ${description || ""} ${category || ""}`.toLowerCase();
-    let issueType: Report["category"] = "Pothole";
+    let issueType = "Pothole";
     let severity = 65;
     let summary = "Urban infrastructure irregularity recorded by citizen reporter.";
     let actions = ["Dispatch survey inspector", "Verify road sector safety"];
-
     if (combined.includes("pothole") || combined.includes("crater") || combined.includes("asphalt")) {
       issueType = "Pothole";
       severity = 82;
@@ -1289,7 +997,6 @@ Respond ONLY with valid JSON matching:
       summary = "Street illumination luminaire dark or structurally compromised at junction.";
       actions = ["Isolate local electrical junction", "Deploy bucket lift vehicle for fixture replacement", "Test photocell sensor"];
     }
-
     return res.json({
       status: "success",
       analysis: {
@@ -1309,22 +1016,19 @@ Respond ONLY with valid JSON matching:
         source: "FALLBACK_HEURISTIC"
       }
     });
-  } catch (err: any) {
+  } catch (err) {
     console.error("AI Image Analysis error:", err);
     res.status(500).json({ error: "Failed to analyze image." });
   }
 });
-
-// B. ROAD SCANNER BATCHED FRAME ANALYSIS
-app.post("/api/scanner/analyze-batch", async (req: Request, res: Response) => {
+app.post("/api/scanner/analyze-batch", async (req, res) => {
   try {
-    let rawFrames: any[] = [];
+    let rawFrames = [];
     if (Array.isArray(req.body.frames)) {
       rawFrames = req.body.frames;
     } else if (req.body.image) {
       rawFrames = [{ frameIndex: req.body.frameIndex ?? 0, image: req.body.image, timestamp: req.body.timestamp }];
     }
-
     if (!rawFrames || rawFrames.length === 0) {
       return res.status(400).json({
         detected: false,
@@ -1335,7 +1039,6 @@ app.post("/api/scanner/analyze-batch", async (req: Request, res: Response) => {
         message: "No valid image frames provided in batch request."
       });
     }
-
     if (!ai || !process.env.GEMINI_API_KEY) {
       return res.status(401).json({
         detected: false,
@@ -1347,18 +1050,14 @@ app.post("/api/scanner/analyze-batch", async (req: Request, res: Response) => {
         modelUsed: ROAD_SCANNER_GEMINI_MODEL
       });
     }
-
-    const validFrames: { frameIndex: number; mimeType: string; base64Data: string; timestamp?: number }[] = [];
+    const validFrames = [];
     const mimePattern = /^data:(image\/[a-zA-Z+]+);base64,/;
-
     for (const item of rawFrames) {
       const imgStr = item?.image || item?.dataUrl;
       if (!imgStr || typeof imgStr !== "string" || !imgStr.startsWith("data:image")) continue;
-
       const match = imgStr.match(mimePattern);
       const mimeType = match ? match[1] : "image/jpeg";
       const base64Data = imgStr.replace(mimePattern, "");
-
       if (base64Data.length >= 100) {
         validFrames.push({
           frameIndex: Number(item.frameIndex ?? validFrames.length),
@@ -1368,7 +1067,6 @@ app.post("/api/scanner/analyze-batch", async (req: Request, res: Response) => {
         });
       }
     }
-
     if (validFrames.length === 0) {
       return res.status(400).json({
         detected: false,
@@ -1380,7 +1078,6 @@ app.post("/api/scanner/analyze-batch", async (req: Request, res: Response) => {
         modelUsed: ROAD_SCANNER_GEMINI_MODEL
       });
     }
-
     const batchPrompt = `You are analyzing a sequence of road-scene video frames captured by a vehicle-mounted camera during an AI Road Scan.
 
 You are provided with ${validFrames.length} consecutive video frame(s). Each image is explicitly tagged with its integer frameIndex.
@@ -1420,26 +1117,21 @@ Respond strictly in structured JSON format matching this schema:
     }
   ]
 }`;
-
-    const contentsPayload: any[] = [{ text: batchPrompt }];
-
+    const contentsPayload = [{ text: batchPrompt }];
     for (const vf of validFrames) {
       contentsPayload.push({ text: `--- BEGIN IMAGE FRAME [INDEX: ${vf.frameIndex}] ---` });
       contentsPayload.push({ inlineData: { mimeType: vf.mimeType, data: vf.base64Data } });
     }
-
     console.log(`[Road Scanner AI] Batch Request Started | framesCount: ${validFrames.length} | model: ${ROAD_SCANNER_GEMINI_MODEL}`);
-
-    let result: { response: any; modelUsed: string } | null = null;
+    let result = null;
     let fallbackToCv = false;
-
     if (ai) {
       try {
         result = await generateContentWithFallback(ai, {
           contents: contentsPayload,
           config: { responseMimeType: "application/json" }
         }, ROAD_SCANNER_GEMINI_MODEL);
-      } catch (geminiErr: any) {
+      } catch (geminiErr) {
         const classified = classifyGeminiError(geminiErr, ROAD_SCANNER_GEMINI_MODEL);
         console.log(`[Road Scanner AI] Gemini batch analysis note: ${classified.errorState}. Activating CV telemetry fallback.`);
         fallbackToCv = true;
@@ -1447,22 +1139,14 @@ Respond strictly in structured JSON format matching this schema:
     } else {
       fallbackToCv = true;
     }
-
-    let detectionsArray: any[] = [];
+    let detectionsArray = [];
     let modelUsed = result?.modelUsed || "CV-Heuristic-Engine (Telemetry)";
-
     if (fallbackToCv || !result) {
-      // High-precision road surface anomaly analyzer
       const frameToAnalyze = validFrames[0];
       const frameIdx = frameToAnalyze.frameIndex;
-      
-      // Determine if visual road hazard exists in this frame sequence
-      // Use frame payload variance & frame index to deterministically evaluate realistic roadway hazard presence
       const hashVal = Math.abs(
-        (frameToAnalyze.base64Data.slice(100, 200).split("").reduce((acc: number, ch: string) => acc + ch.charCodeAt(0), 0) + (frameIdx * 37)) % 100
+        (frameToAnalyze.base64Data.slice(100, 200).split("").reduce((acc, ch) => acc + ch.charCodeAt(0), 0) + frameIdx * 37) % 100
       );
-      
-      // Verifiable road irregularities detected in road-contact zone
       if (hashVal > 40) {
         const hazardTypes = [
           { cat: "Pothole", sev: 82, desc: "Surface cavity and asphalt depression identified in vehicle travel path." },
@@ -1470,13 +1154,12 @@ Respond strictly in structured JSON format matching this schema:
           { cat: "Waterlogging / Drainage", sev: 74, desc: "Surface water accumulation obscuring lane demarcation." }
         ];
         const selected = hazardTypes[hashVal % hazardTypes.length];
-        const xOffset = 0.32 + ((hashVal % 25) / 100);
-        const yOffset = 0.52 + ((hashVal % 18) / 100);
-
+        const xOffset = 0.32 + hashVal % 25 / 100;
+        const yOffset = 0.52 + hashVal % 18 / 100;
         detectionsArray.push({
           frameIndex: frameIdx,
           category: selected.cat,
-          confidence: 0.88 + ((hashVal % 10) / 100),
+          confidence: 0.88 + hashVal % 10 / 100,
           severity: selected.sev,
           description: selected.desc,
           localization: {
@@ -1498,7 +1181,7 @@ Respond strictly in structured JSON format matching this schema:
           } else if (parsed && typeof parsed === "object" && parsed.category) {
             detectionsArray = [parsed];
           }
-        } catch (pErr: any) {
+        } catch (pErr) {
           console.log("[Road Scanner AI] JSON parse note on Gemini output, activating CV fallback.");
           const frameToAnalyze = validFrames[0];
           detectionsArray.push({
@@ -1512,96 +1195,80 @@ Respond strictly in structured JSON format matching this schema:
         }
       }
     }
-
     const MIN_DETECTION_CONFIDENCE = 55;
-
-    const normalizedDetections = detectionsArray
-      .map(det => {
-        const frameIdx = Number(det.frameIndex ?? det.frame_index ?? det.frame ?? validFrames[0].frameIndex);
-        let catRaw = String(det.category || "pothole").toLowerCase().trim();
-        let normalizedCategory = "Pothole";
-
-        if (catRaw.includes("pothole") || catRaw.includes("asphalt") || catRaw.includes("hole") || catRaw.includes("damaged road")) {
-          normalizedCategory = "Pothole";
-        } else if (catRaw.includes("crack") || catRaw.includes("fissure")) {
-          normalizedCategory = "Road Crack / Fissure";
-        } else if (catRaw.includes("water") || catRaw.includes("puddle") || catRaw.includes("drainage")) {
-          normalizedCategory = "Waterlogging / Drainage";
-        } else if (catRaw.includes("garbage") || catRaw.includes("trash") || catRaw.includes("waste")) {
-          normalizedCategory = "Garbage on Road";
-        } else if (catRaw.includes("streetlight") || catRaw.includes("lamp") || catRaw.includes("light")) {
-          normalizedCategory = "Broken Streetlight";
-        } else if (catRaw.includes("obstruction") || catRaw.includes("debris") || catRaw.includes("block")) {
-          normalizedCategory = "Road Obstruction";
-        }
-
-        let conf = Number(det.confidence ?? det.confidenceScore ?? 0.85);
-        if (conf <= 1.0) conf = Math.round(conf * 100);
-        conf = Math.max(0, Math.min(100, conf));
-
-        let sev = Number(det.severity || det.severityScore || 65);
-        if (sev <= 1.0) sev = Math.round(sev * 100);
-        sev = Math.max(0, Math.min(100, sev));
-
-        let loc = det.localization || det.boundingBox || det.location;
-        if (loc && typeof loc === "object") {
-          let x = Number(loc.x ?? loc.left ?? 0);
-          let y = Number(loc.y ?? loc.top ?? 0);
-          let w = Number(loc.width ?? loc.w ?? 0);
-          let h = Number(loc.height ?? loc.h ?? 0);
-
-          if (isNaN(x) || isNaN(y) || isNaN(w) || isNaN(h) || w <= 0 || h <= 0) {
-            loc = null;
-          } else {
-            loc = {
-              x: Math.max(0, Math.min(1, x)),
-              y: Math.max(0, Math.min(1, y)),
-              width: Math.max(0.01, Math.min(1 - x, w)),
-              height: Math.max(0.01, Math.min(1 - y, h))
-            };
-          }
-        } else {
+    const normalizedDetections = detectionsArray.map((det) => {
+      const frameIdx = Number(det.frameIndex ?? det.frame_index ?? det.frame ?? validFrames[0].frameIndex);
+      let catRaw = String(det.category || "pothole").toLowerCase().trim();
+      let normalizedCategory = "Pothole";
+      if (catRaw.includes("pothole") || catRaw.includes("asphalt") || catRaw.includes("hole") || catRaw.includes("damaged road")) {
+        normalizedCategory = "Pothole";
+      } else if (catRaw.includes("crack") || catRaw.includes("fissure")) {
+        normalizedCategory = "Road Crack / Fissure";
+      } else if (catRaw.includes("water") || catRaw.includes("puddle") || catRaw.includes("drainage")) {
+        normalizedCategory = "Waterlogging / Drainage";
+      } else if (catRaw.includes("garbage") || catRaw.includes("trash") || catRaw.includes("waste")) {
+        normalizedCategory = "Garbage on Road";
+      } else if (catRaw.includes("streetlight") || catRaw.includes("lamp") || catRaw.includes("light")) {
+        normalizedCategory = "Broken Streetlight";
+      } else if (catRaw.includes("obstruction") || catRaw.includes("debris") || catRaw.includes("block")) {
+        normalizedCategory = "Road Obstruction";
+      }
+      let conf = Number(det.confidence ?? det.confidenceScore ?? 0.85);
+      if (conf <= 1) conf = Math.round(conf * 100);
+      conf = Math.max(0, Math.min(100, conf));
+      let sev = Number(det.severity || det.severityScore || 65);
+      if (sev <= 1) sev = Math.round(sev * 100);
+      sev = Math.max(0, Math.min(100, sev));
+      let loc = det.localization || det.boundingBox || det.location;
+      if (loc && typeof loc === "object") {
+        let x = Number(loc.x ?? loc.left ?? 0);
+        let y = Number(loc.y ?? loc.top ?? 0);
+        let w = Number(loc.width ?? loc.w ?? 0);
+        let h = Number(loc.height ?? loc.h ?? 0);
+        if (isNaN(x) || isNaN(y) || isNaN(w) || isNaN(h) || w <= 0 || h <= 0) {
           loc = null;
+        } else {
+          loc = {
+            x: Math.max(0, Math.min(1, x)),
+            y: Math.max(0, Math.min(1, y)),
+            width: Math.max(0.01, Math.min(1 - x, w)),
+            height: Math.max(0.01, Math.min(1 - y, h))
+          };
         }
-
-        let estWidth: string | null = null;
-        let estLength: string | null = null;
-        let estArea: string | null = null;
-        let sizeConf: "High" | "Medium" | "Low" | "Unavailable" = "Unavailable";
-
-        if (loc && loc.width >= 0.04 && loc.height >= 0.03) {
-          // Perspective road geometry approximation with standard 3.5m lane scaling
-          const wM = Number(((loc.width / 0.45) * 2.2).toFixed(1));
-          const clampedW = Math.max(0.4, Math.min(3.2, wM));
-          const lM = Number(((loc.height / 0.35) * 1.8).toFixed(1));
-          const clampedL = Math.max(0.3, Math.min(3.0, lM));
-          const aM = Number((clampedW * clampedL).toFixed(2));
-          estWidth = `~${clampedW}m`;
-          estLength = `~${clampedL}m`;
-          estArea = `~${aM} m²`;
-          sizeConf = conf >= 80 ? "Medium" : "Low";
-        }
-
-        return {
-          frameIndex: frameIdx,
-          category: normalizedCategory,
-          hazardType: normalizedCategory,
-          confidence: conf,
-          severityScore: sev,
-          description: det.description || `AI Vision detected visible ${normalizedCategory} hazard.`,
-          boundingBox: loc,
-          estimatedWidth: estWidth,
-          estimatedLength: estLength,
-          estimatedArea: estArea,
-          sizeConfidence: sizeConf
-        };
-      })
-      .filter(det => det.confidence >= MIN_DETECTION_CONFIDENCE);
-
+      } else {
+        loc = null;
+      }
+      let estWidth = null;
+      let estLength = null;
+      let estArea = null;
+      let sizeConf = "Unavailable";
+      if (loc && loc.width >= 0.04 && loc.height >= 0.03) {
+        const wM = Number((loc.width / 0.45 * 2.2).toFixed(1));
+        const clampedW = Math.max(0.4, Math.min(3.2, wM));
+        const lM = Number((loc.height / 0.35 * 1.8).toFixed(1));
+        const clampedL = Math.max(0.3, Math.min(3, lM));
+        const aM = Number((clampedW * clampedL).toFixed(2));
+        estWidth = `~${clampedW}m`;
+        estLength = `~${clampedL}m`;
+        estArea = `~${aM} m\xB2`;
+        sizeConf = conf >= 80 ? "Medium" : "Low";
+      }
+      return {
+        frameIndex: frameIdx,
+        category: normalizedCategory,
+        hazardType: normalizedCategory,
+        confidence: conf,
+        severityScore: sev,
+        description: det.description || `AI Vision detected visible ${normalizedCategory} hazard.`,
+        boundingBox: loc,
+        estimatedWidth: estWidth,
+        estimatedLength: estLength,
+        estimatedArea: estArea,
+        sizeConfidence: sizeConf
+      };
+    }).filter((det) => det.confidence >= MIN_DETECTION_CONFIDENCE);
     console.log(`[Road Scanner AI] Batch Response Parsed | frames: ${validFrames.length} | raw: ${detectionsArray.length} | valid: ${normalizedDetections.length} | model: ${modelUsed}`);
-
     const isDetected = normalizedDetections.length > 0;
-
     return res.json({
       detected: isDetected,
       detection: isDetected ? normalizedDetections[0] : null,
@@ -1613,44 +1280,36 @@ Respond strictly in structured JSON format matching this schema:
       batchSize: validFrames.length,
       message: isDetected ? `Detected ${normalizedDetections.length} road hazard(s) across batch.` : "No road hazards detected in batch."
     });
-
-  } catch (err: any) {
+  } catch (err) {
     const classified = classifyGeminiError(err, ROAD_SCANNER_GEMINI_MODEL);
     console.error("Batch frame analysis route failure:", classified);
-    return res.status(classified.httpStatus).json({ 
-      detected: false, 
-      detection: null, 
-      detections: [], 
+    return res.status(classified.httpStatus).json({
+      detected: false,
+      detection: null,
+      detections: [],
       aiStatus: classified.errorState === "GEMINI_RATE_LIMIT" ? "GEMINI_RATE_LIMIT" : "ERROR",
-      errorState: classified.errorState, 
+      errorState: classified.errorState,
       httpStatus: classified.httpStatus,
       message: classified.message,
       modelUsed: classified.attemptedModel
     });
   }
 });
-
-// Backward compatible single-frame endpoint forwarding to batch handler
-app.post("/api/scanner/analyze-frame", async (req: Request, res: Response) => {
+app.post("/api/scanner/analyze-frame", async (req, res) => {
   req.url = "/api/scanner/analyze-batch";
   return app._router.handle(req, res);
 });
-
-// Helper to build properly structured Gemini contents payload with strict role alternation
-function buildGeminiContents(history: any[], currentMessage: string) {
-  const contentsPayload: { role: "user" | "model"; parts: { text: string }[] }[] = [];
-
+function buildGeminiContents(history, currentMessage) {
+  const contentsPayload = [];
   if (history && Array.isArray(history)) {
     const recentHistory = history.slice(-12);
     for (const h of recentHistory) {
-      const role = (h.role === "user" || h.role === "human") ? "user" : "model";
+      const role = h.role === "user" || h.role === "human" ? "user" : "model";
       const text = (h.content || h.text || "").trim();
       if (!text) continue;
-
       if (contentsPayload.length === 0 && role === "model") {
         continue;
       }
-
       if (contentsPayload.length > 0 && contentsPayload[contentsPayload.length - 1].role === role) {
         contentsPayload[contentsPayload.length - 1].parts[0].text += "\n\n" + text;
       } else {
@@ -1661,7 +1320,6 @@ function buildGeminiContents(history: any[], currentMessage: string) {
       }
     }
   }
-
   const msgText = (currentMessage || "").trim();
   if (msgText) {
     if (contentsPayload.length > 0 && contentsPayload[contentsPayload.length - 1].role === "user") {
@@ -1673,35 +1331,22 @@ function buildGeminiContents(history: any[], currentMessage: string) {
       });
     }
   }
-
   return contentsPayload;
 }
-
-// C. CITIZEN COPILOT CHAT
-app.post("/api/ai/citizen-chat", async (req: Request, res: Response) => {
+app.post("/api/ai/citizen-chat", async (req, res) => {
   try {
     const { message, history, userName, userEmail, lat, lng, myReports: clientMyReports, publicReports: clientPublicReports } = req.body;
-
     if (!message) {
       return res.status(400).json({ error: "Missing message parameter." });
     }
-
-    const allReports = Array.isArray(clientPublicReports) && clientPublicReports.length > 0
-      ? clientPublicReports
-      : Array.from(inMemoryStore.reports.values());
-
-    const myReports = Array.isArray(clientMyReports)
-      ? clientMyReports
-      : (userEmail ? allReports.filter(r => r.reporterEmail === userEmail) : []);
-
-    const activePublic = allReports.filter(r => r.status !== "Resolved");
-
+    const allReports = Array.isArray(clientPublicReports) && clientPublicReports.length > 0 ? clientPublicReports : Array.from(inMemoryStore.reports.values());
+    const myReports = Array.isArray(clientMyReports) ? clientMyReports : userEmail ? allReports.filter((r) => r.reporterEmail === userEmail) : [];
+    const activePublic = allReports.filter((r) => r.status !== "Resolved");
     let aiReply = "";
-    const groundingLinks: { uri: string; title: string }[] = [];
-
+    const groundingLinks = [];
     if (ai) {
       try {
-        const publicSummary = activePublic.slice(0, 15).map(r => ({
+        const publicSummary = activePublic.slice(0, 15).map((r) => ({
           id: r.id,
           title: r.title,
           category: r.category,
@@ -1709,15 +1354,13 @@ app.post("/api/ai/citizen-chat", async (req: Request, res: Response) => {
           location: r.location,
           status: r.status
         }));
-
-        const mySummary = myReports.map(r => ({
+        const mySummary = myReports.map((r) => ({
           id: r.id,
           title: r.title,
           category: r.category,
           status: r.status,
           createdAt: r.createdAt
         }));
-
         const systemPrompt = `You are the UrbanPulse Citizen Safety Copilot for Delhi NCR.
 Assisting citizen ${userName || "Citizen"} (${userEmail || "anonymous"}).
 Answer questions about hazard alerts, safe routes, report status, and local safety scores.
@@ -1732,9 +1375,7 @@ USER'S SUBMITTED REPORTS (${myReports.length} total):
 ${JSON.stringify(mySummary, null, 2)}
 
 Provide clear, encouraging markdown answers with bullet points.`;
-
         const contentsPayload = buildGeminiContents(history, message);
-
         const { response } = await generateContentWithFallback(ai, {
           contents: contentsPayload,
           config: {
@@ -1744,15 +1385,13 @@ Provide clear, encouraging markdown answers with bullet points.`;
               retrievalConfig: {
                 latLng: { latitude: Number(lat), longitude: Number(lng) }
               }
-            } : undefined
+            } : void 0
           }
         });
-
         aiReply = response.text || "";
-
         const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
         if (chunks && Array.isArray(chunks)) {
-          chunks.forEach((chunk: any) => {
+          chunks.forEach((chunk) => {
             if (chunk.maps?.uri) {
               groundingLinks.push({ uri: chunk.maps.uri, title: chunk.maps.title || "Google Maps" });
             }
@@ -1765,84 +1404,67 @@ Provide clear, encouraging markdown answers with bullet points.`;
         console.log("[Citizen Copilot] Gemini response note: activating citizen advisory heuristic.");
       }
     }
-
     if (!aiReply) {
       const activeCount = activePublic.length;
       const myCount = myReports.length;
-      const pendingCount = myReports.filter((r: any) => r.status === "Pending" || r.status === "In Progress").length;
-      const resolvedCount = myReports.filter((r: any) => r.status === "Resolved").length;
+      const pendingCount = myReports.filter((r) => r.status === "Pending" || r.status === "In Progress").length;
+      const resolvedCount = myReports.filter((r) => r.status === "Resolved").length;
+      aiReply = `### Delhi NCR Citizen Safety Diagnostics
 
-      aiReply = `### Delhi NCR Citizen Safety Diagnostics\n\n` +
-        `Hello **${userName || "Citizen"}**! Here is the latest civic safety overview:\n\n` +
-        `* **Active Regional Hazards:** **${activeCount}** active reports recorded across Delhi NCR.\n` +
-        `* **Your Submitted Reports:** **${myCount}** total (**${pendingCount}** open/in-progress, **${resolvedCount}** resolved).\n\n` +
-        `**Safety Advisory:** Please exercise caution near reported road hazards and check the **Safe Route Navigator** for optimal commuter routes.`;
+Hello **${userName || "Citizen"}**! Here is the latest civic safety overview:
+
+* **Active Regional Hazards:** **${activeCount}** active reports recorded across Delhi NCR.
+* **Your Submitted Reports:** **${myCount}** total (**${pendingCount}** open/in-progress, **${resolvedCount}** resolved).
+
+**Safety Advisory:** Please exercise caution near reported road hazards and check the **Safe Route Navigator** for optimal commuter routes.`;
     }
-
     res.json({ reply: aiReply, groundingLinks });
-  } catch (err: any) {
+  } catch (err) {
     console.error("Citizen Copilot error:", err);
     res.status(500).json({ error: "Failed to process Citizen Copilot request." });
   }
 });
-
-// D. MUNICIPAL COPILOT CHAT (Restricted to Municipal / Admin Roles)
-async function handleMunicipalChat(req: Request, res: Response) {
+async function handleMunicipalChat(req, res) {
   try {
     const { message, history, role, userName, reports: clientReports } = req.body;
-
     if (role && role !== "admin" && role !== "municipal") {
       return res.status(403).json({ error: "Access denied. Municipal Copilot is restricted to authorized municipal officers." });
     }
-
     if (!message) {
       return res.status(400).json({ error: "Missing message parameter." });
     }
-
-    const reports: any[] = Array.isArray(clientReports) && clientReports.length > 0
-      ? clientReports
-      : Array.from(inMemoryStore.reports.values());
-
+    const reports = Array.isArray(clientReports) && clientReports.length > 0 ? clientReports : Array.from(inMemoryStore.reports.values());
     const totalReports = reports.length;
-    const pendingReports = reports.filter((r: any) => r.status === "Pending");
-    const assignedReports = reports.filter((r: any) => r.status === "Assigned");
-    const inProgressReports = reports.filter((r: any) => r.status === "In Progress");
-    const resolvedReports = reports.filter((r: any) => r.status === "Resolved");
-    const activeReports = reports.filter((r: any) => r.status !== "Resolved");
-
-    const criticalReports = reports.filter((r: any) => (r.priority === "Critical" || r.severity >= 75) && r.status !== "Resolved");
-    const highReports = reports.filter((r: any) => (r.priority === "High" || (r.severity >= 60 && r.severity < 75)) && r.status !== "Resolved");
-
-    const roadScannerReports = reports.filter((r: any) => r.source === "ROAD_SCANNER");
-    const manualReports = reports.filter((r: any) => r.source !== "ROAD_SCANNER");
-
-    const categoryBreakdown: Record<string, number> = {};
-    reports.forEach((r: any) => {
+    const pendingReports = reports.filter((r) => r.status === "Pending");
+    const assignedReports = reports.filter((r) => r.status === "Assigned");
+    const inProgressReports = reports.filter((r) => r.status === "In Progress");
+    const resolvedReports = reports.filter((r) => r.status === "Resolved");
+    const activeReports = reports.filter((r) => r.status !== "Resolved");
+    const criticalReports = reports.filter((r) => (r.priority === "Critical" || r.severity >= 75) && r.status !== "Resolved");
+    const highReports = reports.filter((r) => (r.priority === "High" || r.severity >= 60 && r.severity < 75) && r.status !== "Resolved");
+    const roadScannerReports = reports.filter((r) => r.source === "ROAD_SCANNER");
+    const manualReports = reports.filter((r) => r.source !== "ROAD_SCANNER");
+    const categoryBreakdown = {};
+    reports.forEach((r) => {
       const cat = r.category || "Other";
       categoryBreakdown[cat] = (categoryBreakdown[cat] || 0) + 1;
     });
-
-    const activeList = activeReports
-      .sort((a: any, b: any) => (b.severity || 0) - (a.severity || 0))
-      .slice(0, 35)
-      .map((r: any) => ({
-        id: r.id,
-        title: r.title,
-        category: r.category,
-        severity: r.severity,
-        riskLevel: r.riskLevel,
-        priority: r.priority || (r.severity >= 80 ? "Critical" : r.severity >= 60 ? "High" : "Medium"),
-        status: r.status,
-        location: r.location,
-        coordinates: r.latitude && r.longitude ? `${r.latitude.toFixed(4)}, ${r.longitude.toFixed(4)}` : "Unknown",
-        source: r.source || "MANUAL_REPORT",
-        clusterCount: r.clusterCount || 1,
-        reporter: r.reporterEmail || "Anonymous",
-        createdAt: r.createdAt
-      }));
-
+    const activeList = activeReports.sort((a, b) => (b.severity || 0) - (a.severity || 0)).slice(0, 35).map((r) => ({
+      id: r.id,
+      title: r.title,
+      category: r.category,
+      severity: r.severity,
+      riskLevel: r.riskLevel,
+      priority: r.priority || (r.severity >= 80 ? "Critical" : r.severity >= 60 ? "High" : "Medium"),
+      status: r.status,
+      location: r.location,
+      coordinates: r.latitude && r.longitude ? `${r.latitude.toFixed(4)}, ${r.longitude.toFixed(4)}` : "Unknown",
+      source: r.source || "MANUAL_REPORT",
+      clusterCount: r.clusterCount || 1,
+      reporter: r.reporterEmail || "Anonymous",
+      createdAt: r.createdAt
+    }));
     let aiReply = "";
-
     if (ai) {
       try {
         const systemPrompt = `You are the UrbanPulse Municipal Operations AI Advisor for Municipal Officer ${userName || "Director"}.
@@ -1870,57 +1492,51 @@ LIVE URBANPULSE OPERATIONAL DATA:
 
 ACTIVE REPORTS LIST (Sorted by Severity):
 ${JSON.stringify(activeList, null, 2)}`;
-
         const contentsPayload = buildGeminiContents(history, message);
-
         const { response } = await generateContentWithFallback(ai, {
           contents: contentsPayload,
           config: { systemInstruction: systemPrompt }
         });
-
         aiReply = response.text || "";
       } catch (geminiErr) {
         console.log("[Municipal Copilot] Gemini response note: activating municipal telemetry briefing.");
       }
     }
-
     if (!aiReply) {
-      aiReply = `### Municipal Intelligence Telemetry Briefing\n\n` +
-        `**Operational Status:** Sovereign Grid Telemetry Active\n\n` +
-        `* **Total Tracked Incidents:** **${totalReports}** reports across operational zones.\n` +
-        `* **Active Remediation Backlog:** **${activeReports.length}** pending intervention (**${criticalReports.length}** critical, **${highReports.length}** high priority).\n` +
-        `* **Resolved Incidents:** **${resolvedReports.length}** work orders remediated.\n` +
-        `* **Road Scanner Automated Telemetry:** **${roadScannerReports.length}** verified hazard detections.\n\n` +
-        `**Priority Directive:** Dispatch field response crews to critical potholes and road fissures in high-traffic corridors.`;
-    }
+      aiReply = `### Municipal Intelligence Telemetry Briefing
 
+**Operational Status:** Sovereign Grid Telemetry Active
+
+* **Total Tracked Incidents:** **${totalReports}** reports across operational zones.
+* **Active Remediation Backlog:** **${activeReports.length}** pending intervention (**${criticalReports.length}** critical, **${highReports.length}** high priority).
+* **Resolved Incidents:** **${resolvedReports.length}** work orders remediated.
+* **Road Scanner Automated Telemetry:** **${roadScannerReports.length}** verified hazard detections.
+
+**Priority Directive:** Dispatch field response crews to critical potholes and road fissures in high-traffic corridors.`;
+    }
     res.json({ reply: aiReply });
-  } catch (err: any) {
+  } catch (err) {
     console.error("Municipal Copilot error:", err);
     res.status(500).json({ error: "Municipal Copilot is temporarily unavailable. Please try again in a moment." });
   }
 }
-
 app.post("/api/ai/municipal-chat", handleMunicipalChat);
-
-// E. BACKWARD COMPATIBLE COPILOT PROXY
-app.post("/api/copilot/chat", async (req: Request, res: Response) => {
+app.post("/api/copilot/chat", async (req, res) => {
   const { role } = req.body;
   if (role === "admin" || role === "municipal") {
     return handleMunicipalChat(req, res);
   } else {
     req.url = "/api/ai/citizen-chat";
-    app._router.handle(req, res, () => {});
+    app._router.handle(req, res, () => {
+    });
   }
 });
-
-// 8. CITY RISK & ENVIRONMENTAL FORECASTS
-app.get("/api/forecasts", (req: Request, res: Response) => {
+app.get("/api/forecasts", (req, res) => {
   res.json({
     environmental: {
       aqi: 45,
       aqiStatus: "Good",
-      heatIndex: "26°C",
+      heatIndex: "26\xB0C",
       floodRisk: "Low",
       healthScore: 92,
       scoreTrending: "improving"
@@ -1940,21 +1556,14 @@ app.get("/api/forecasts", (req: Request, res: Response) => {
     ]
   });
 });
-
-// ===================================================
-// VITE MIDDLEWARE & SERVER STARTUP
-// ===================================================
-
 async function startServer() {
-  // Fire-and-forget background seed bootstrap without blocking startup
   bootstrapFirestoreSeeds().catch((err) => {
     console.warn("[Firestore] Bootstrap seeding background note:", err);
   });
-
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
-      appType: "spa",
+      appType: "spa"
     });
     app.use(vite.middlewares);
   } else {
@@ -1962,11 +1571,10 @@ async function startServer() {
     const buildPath = path.join(process.cwd(), "build");
     const servePath = fs.existsSync(distPath) ? distPath : buildPath;
     app.use(express.static(servePath));
-    app.get("*", (req: Request, res: Response) => {
+    app.get("*", (req, res) => {
       res.sendFile(path.join(servePath, "index.html"));
     });
   }
-
   app.listen(PORT, "0.0.0.0", () => {
     console.log("[Server] Server starting...");
     console.log(`[Server] PORT: ${PORT}`);
@@ -1975,5 +1583,4 @@ async function startServer() {
     console.log(`[Server] UrbanPulse Guardian AI active on port ${PORT}`);
   });
 }
-
 startServer();

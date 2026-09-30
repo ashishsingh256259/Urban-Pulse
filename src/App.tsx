@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { User, Report, Notification, RoadScanCandidate, RoadScanSession } from "./types";
+import { doc, updateDoc } from "firebase/firestore";
+import { db } from "./lib/firebase";
+import { DEFAULT_FIELD_TEAMS, assignFieldTask, reassignFieldTask } from "./services/fieldOperationsService";
 import { getReport } from "./services/reportsService";
 import { subscribeToReports, updateReportStatus as dbUpdateReportStatus, bulkUpdateReportStatus, deleteReport, createReport } from "./lib/firestore_reports";
 import { subscribeToNotifications, markNotificationAsRead, markAllNotificationsAsRead } from "./services/notificationsService";
@@ -45,7 +48,7 @@ import {
   MapPin, AlertOctagon, CheckSquare, Clock, ArrowRight, Save, User as UserIcon, Lock, Landmark, Sparkles, AlertCircle, Loader2, LogIn, UserPlus, Mail,
   Terminal, Activity, Columns, Bell, LogOut, RefreshCw, Menu, X, Check, Laptop, ChevronRight, ChevronDown, Compass, Wind, LayoutDashboard, BarChart3,
   Camera, Navigation, Award, AlertTriangle, ShieldCheck, FileText, Wrench, Shield,
-  Users, Briefcase, Settings, Radio, Send
+  Users, Briefcase, Settings, Radio, Send, UserCheck
 } from "lucide-react";
 
 
@@ -164,7 +167,7 @@ export default function App() {
   // High-fidelity sidebar terminal states
   const [activeTerminal, setActiveTerminal] = useState<"citizen" | "admin" | "field_team" | "split">("citizen");
   const [activeSubTab, setActiveSubTab] = useState<
-    "citizen-home" | "my-reports" | "municipal-home" | "command-center" | "citizen-signals" | "incident-intelligence" | "field-verification" | "infrastructure" | "dispatch-management" | "road-scanner" | "candidate-review" | "safe-route" | "rewards" | "emergency-sos" | "copilot" | "analytics" | "digital-twin" | "safety" | "traffic" | "environmental" | "emergency" | "field-operations" | "admin-panel" | "admin-users" | "admin-teams" | "admin-settings"
+    "citizen-home" | "my-reports" | "municipal-home" | "command-center" | "citizen-signals" | "incident-intelligence" | "field-verification" | "infrastructure" | "dispatch-management" | "road-scanner" | "candidate-review" | "safe-route" | "rewards" | "emergency-sos" | "copilot" | "analytics" | "digital-twin" | "safety" | "traffic" | "environmental" | "emergency" | "field-operations" | "admin-panel" | "admin-users" | "admin-teams" | "admin-settings" | "gis-navigation" | "safety-sos" | "field-copilot" | "team-profile"
   >("citizen-home");
 
   const [muniKpiFilter, setMuniKpiFilter] = useState<
@@ -238,7 +241,7 @@ export default function App() {
       }
     } else if (currentUser.role === "field_team") {
       const allowedForFieldTeam = [
-        "field-operations", "road-scanner", "safety", "safe-route", "emergency-sos", "infrastructure"
+        "field-operations", "road-scanner", "gis-navigation", "safety-sos", "field-copilot", "team-profile"
       ];
       if (!allowedForFieldTeam.includes(activeSubTab)) {
         setActiveSubTab("field-operations");
@@ -431,17 +434,79 @@ export default function App() {
     officerName: string;
   }) => {
     try {
-      await dbUpdateReportStatus(payload.id, payload.status, payload.comment);
-        if (selectedReport && selectedReport.id === payload.id) {
-          setSelectedReport({
-            ...selectedReport,
-            status: payload.status,
-            assignedTo: payload.assignedTo
-          });
+      const existingReport = reports.find(r => r.id === payload.id);
+      const oldAssignedTo = existingReport?.assignedTo || null;
+      const newAssignedTo = payload.assignedTo;
+
+      if (newAssignedTo && newAssignedTo !== oldAssignedTo) {
+        // Find matched team in DEFAULT_FIELD_TEAMS
+        const { DEFAULT_FIELD_TEAMS, assignFieldTask, reassignFieldTask } = await import("./services/fieldOperationsService");
+        const matchedTeam = DEFAULT_FIELD_TEAMS.find(
+          t => t.name.toLowerCase() === newAssignedTo.toLowerCase() || t.id.toLowerCase() === newAssignedTo.toLowerCase()
+        );
+        if (matchedTeam) {
+          const isReassign = Boolean(oldAssignedTo);
+          if (isReassign) {
+            await reassignFieldTask(
+              payload.id,
+              matchedTeam.id,
+              matchedTeam.name,
+              payload.officerName || "Municipal Dispatcher",
+              "Supervisory reassignment via control board",
+              payload.comment,
+              existingReport?.priority || "Medium"
+            );
+          } else {
+            await assignFieldTask(
+              payload.id,
+              matchedTeam.id,
+              matchedTeam.name,
+              payload.officerName || "Municipal Dispatcher",
+              existingReport?.priority || "Medium",
+              payload.comment,
+              24
+            );
+          }
+        } else {
+          await dbUpdateReportStatus(payload.id, payload.status, payload.comment);
         }
-        if (currentUser) {
-          syncOperationalDatasets(currentUser.email, currentUser.role);
+      } else {
+        await dbUpdateReportStatus(payload.id, payload.status, payload.comment);
+
+        // If unassigning
+        if (!newAssignedTo && oldAssignedTo) {
+          const matchedOldTeam = DEFAULT_FIELD_TEAMS.find(
+            t => t.name.toLowerCase() === oldAssignedTo.toLowerCase() || t.id.toLowerCase() === oldAssignedTo.toLowerCase()
+          );
+          if (matchedOldTeam) {
+            if (db) {
+              const oldTeamRef = doc(db, "fieldTeams", matchedOldTeam.id);
+              await updateDoc(oldTeamRef, {
+                availability: "AVAILABLE",
+                activeTaskCount: 0,
+                currentIncidentId: null,
+                currentIncidentTitle: null,
+                lastOperationalStatus: "Released by Municipal Dispatcher",
+                lastUpdate: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+              });
+            }
+          }
+
+          if (db) {
+            const reportRef = doc(db, "reports", payload.id);
+            await updateDoc(reportRef, {
+              assignedTo: null,
+              assignedTeamId: null,
+              assignedTeamName: null,
+              fieldStatus: null,
+              workflowState: "PENDING",
+              assignment: null,
+              updatedAt: new Date().toISOString()
+            });
+          }
         }
+      }
     } catch (e) {
       console.error("Failed to post status modifications:", e);
     }
@@ -733,18 +798,34 @@ export default function App() {
 
   const fieldTeamGroups = [
     {
-      title: t("nav.operations", "FIELD OPERATIONS"),
+      title: isHindi ? "परिचालन" : "OPERATIONS",
       items: [
-        { id: "field-operations", label: t("nav.fieldOperations", "Field Operations Deck"), desc: t("nav.fieldOperationsDesc", "Assigned repair queue & SLA"), icon: Wrench },
-        { id: "road-scanner", label: t("nav.roadScanner", "AI Road Scanner"), desc: t("nav.roadScannerDesc", "Mobile hazard scanner"), icon: Camera },
+        { id: "field-operations", label: isHindi ? "फील्ड ऑपरेशन्स डेक" : "Field Operations Deck", desc: t("nav.fieldOperationsDesc", "Assigned repair queue & SLA"), icon: Wrench },
+        { id: "road-scanner", label: isHindi ? "रोड स्कैनर" : "Road Scanner", desc: t("nav.roadScannerDesc", "Mobile hazard scanner"), icon: Camera },
       ]
     },
     {
-      title: t("nav.mapRoute", "MAP & ROUTE"),
+      title: isHindi ? "मानचित्र और घटनाएं" : "MAP & INCIDENTS",
       items: [
-        { id: "safety", label: isHindi ? "घटना मानचित्र" : "Incident Map", desc: t("nav.mapHeatmapDesc", "GIS hazard overlay"), icon: MapPin },
-        { id: "safe-route", label: isHindi ? "सुरक्षित नेविगेशन" : "Safe Navigation", desc: t("nav.safeRouteDesc", "Route hazard guidance"), icon: Navigation },
-        { id: "emergency-sos", label: isHindi ? "फील्ड इमरजेंसी SOS" : "Field Emergency SOS", desc: isHindi ? "अलर्ट डिस्पैच डेस्क" : "Alert dispatch desk", icon: AlertTriangle },
+        { id: "gis-navigation", label: isHindi ? "जीआईएस नेविगेशन मैप" : "GIS Navigation Map", desc: "Interactive operations GIS workspace", icon: Compass },
+      ]
+    },
+    {
+      title: isHindi ? "सुरक्षा" : "SAFETY",
+      items: [
+        { id: "safety-sos", label: isHindi ? "सुरक्षा और एसओएस" : "Safety & SOS", desc: "Combined field alert & emergency SOS", icon: AlertTriangle },
+      ]
+    },
+    {
+      title: isHindi ? "एआई इंटेलिजेंस" : "AI INTELLIGENCE",
+      items: [
+        { id: "field-copilot", label: isHindi ? "फील्ड कोपायलट एआई" : "Field Copilot AI", desc: "AI-grounded operational guidance", icon: Sparkles },
+      ]
+    },
+    {
+      title: isHindi ? "टीम" : "TEAM",
+      items: [
+        { id: "team-profile", label: isHindi ? "टीम प्रोफाइल" : "Team Profile", desc: "Field squad roster details", icon: Users },
       ]
     }
   ];
@@ -1626,7 +1707,7 @@ export default function App() {
             )}
 
             {/* FIELD OPERATIONS & REPAIR DECK (STRICTLY FOR FIELD SQUADS ONLY) */}
-            {activeSubTab === "field-operations" && (
+            {(activeSubTab === "field-operations" || activeSubTab === "gis-navigation" || activeSubTab === "safety-sos" || activeSubTab === "field-copilot" || activeSubTab === "team-profile") && (
               <RoleGuard 
                 allowedRoles={["field_team"]}
                 fallback={
@@ -1664,7 +1745,48 @@ export default function App() {
                     teamId={userProfile?.teamId || "RT-014"}
                     teamName={userProfile?.teamName || "Road Maintenance Team Alpha"}
                     teamLead={userProfile?.teamLead || currentUser.fullName}
+                    initialTab={
+                      activeSubTab === "gis-navigation" ? "map" :
+                      activeSubTab === "safety-sos" ? "safety" :
+                      activeSubTab === "field-copilot" ? "copilot" :
+                      activeSubTab === "team-profile" ? "profile" :
+                      "overview"
+                    }
                     onRefreshReports={() => syncOperationalDatasets(currentUser.email, currentUser.role)}
+                    onNavigateSidebar={(tabId) => {
+                      if (tabId === "overview") setActiveSubTab("field-operations");
+                      else if (tabId === "map") setActiveSubTab("gis-navigation");
+                      else if (tabId === "safety") setActiveSubTab("safety-sos");
+                      else if (tabId === "copilot") setActiveSubTab("field-copilot");
+                      else if (tabId === "profile") setActiveSubTab("team-profile");
+                    }}
+                  />
+                </div>
+              </RoleGuard>
+            )}
+            
+            {activeSubTab === "road-scanner" && (
+                <RoleGuard allowedRoles={["field_team"]}>
+                    <RoadScanner
+                        onCandidatesReady={() => {}}
+                        onIncidentAutoReported={(newRep) => {
+                            setReports(prev => [newRep, ...prev]);
+                            setSelectedReport(newRep);
+                            syncOperationalDatasets(currentUser.email, currentUser.role);
+                        }}
+                        onSwitchToManual={() => {}}
+                        onSelectReport={(rep) => setSelectedReport(rep)}
+                        currentUserEmail={currentUser.email}
+                    />
+                </RoleGuard>
+            )}
+
+            {activeSubTab === "incident-map" && (
+              <RoleGuard allowedRoles={["municipal", "admin"]}>
+                <div className="w-full">
+                  <UrbanRiskMap
+                    reports={reports}
+                    onSelectReport={(rep) => setSelectedReport(rep)}
                   />
                 </div>
               </RoleGuard>
@@ -1716,25 +1838,6 @@ export default function App() {
               </RoleGuard>
             )}
 
-            {/* SECTION 4: URBAN RISK MAP (SPATIAL INTELLIGENCE) */}
-            {activeSubTab === "safety" && (
-              <RoleGuard allowedRoles={["municipal", "admin", "field_team"]}>
-                <div className="w-full">
-                  <UrbanRiskMap
-                    reports={reports}
-                    onSelectReport={(rep) => setSelectedReport(rep)}
-                    onNavigateToIntelligence={currentUser.role === "field_team" ? undefined : (rep) => {
-                      setSelectedReport(rep);
-                      setActiveSubTab("incident-intelligence");
-                    }}
-                    onNavigateToDispatch={currentUser.role === "field_team" ? undefined : (rep) => {
-                      setSelectedReport(rep);
-                      setActiveSubTab("dispatch-management");
-                    }}
-                  />
-                </div>
-              </RoleGuard>
-            )}
 
             {/* SECTION 6: FIELD VERIFICATION (VERIFY & CLOSED LOOP) */}
             {activeSubTab === "field-verification" && (

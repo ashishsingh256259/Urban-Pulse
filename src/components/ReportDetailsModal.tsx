@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Report, StatusHistory, UserRole, isEmergencySosReport } from "../types";
+import { doc, updateDoc, getDoc } from "firebase/firestore";
 import { 
   X, ShieldAlert, CheckCircle2, User, Clock, AlertTriangle, ArrowRight, 
   Loader2, Camera, FileText, Layers, Sparkles, MapPin, Check, ThumbsUp, RotateCcw, Wrench, AlertOctagon
@@ -8,6 +9,9 @@ import { getReportHistory } from "../services/reportsService";
 import { DEFAULT_FIELD_TEAMS, approveFieldResolution, rejectFieldResolution } from "../services/fieldOperationsService";
 import { useLanguage } from "../context/LanguageContext";
 import ReportExportButton from "./ReportExportButton";
+import { db } from "../lib/firebase";
+import { isDemoModeActive, DEMO_REPORTS } from "../services/demoDataService";
+import { createNotification } from "../services/notificationsService";
 
 interface ReportDetailsModalProps {
   report: Report | null;
@@ -44,9 +48,121 @@ export default function ReportDetailsModal({
   const [rejectionReason, setRejectionReason] = useState("Incomplete Repair");
   const [rejectionNotes, setRejectionNotes] = useState("");
 
+  // Admin Report Rejection state
+  const [isAdminRejectionModalOpen, setIsAdminRejectionModalOpen] = useState(false);
+  const [adminRejectionReason, setAdminRejectionReason] = useState("");
+  const [adminRejectionNote, setAdminRejectionNote] = useState("");
+  const [isSubmittingAdminRejection, setIsSubmittingAdminRejection] = useState(false);
+
+  const handleConfirmAdminRejection = async () => {
+    if (!adminRejectionReason) return;
+    setIsSubmittingAdminRejection(true);
+    const nowStr = new Date().toISOString();
+    try {
+      // 1. Update document fields
+      // If db is active, write to Firestore; otherwise update DEMO_REPORTS
+      if (db && !isDemoModeActive()) {
+        if (db) {
+          const reportRef = doc(db, "reports", report.id);
+          
+          // If it was assigned to a team, we should release the team!
+          if (report.assignedTo) {
+            const matchedTeam = DEFAULT_FIELD_TEAMS.find(
+              t => t.name.toLowerCase() === report.assignedTo!.toLowerCase() || t.id.toLowerCase() === report.assignedTo!.toLowerCase()
+            );
+            if (matchedTeam) {
+              const teamRef = doc(db, "fieldTeams", matchedTeam.id);
+              await updateDoc(teamRef, {
+                availability: "AVAILABLE",
+                activeTaskCount: 0,
+                currentIncidentId: null,
+                currentIncidentTitle: null,
+                lastOperationalStatus: "Released due to incident rejection",
+                lastUpdate: nowStr,
+                updatedAt: nowStr
+              });
+            }
+          }
+
+          await updateDoc(reportRef, {
+            status: "REJECTED",
+            rejectionReason: adminRejectionReason,
+            rejectionNote: adminRejectionNote || "",
+            rejectedAt: nowStr,
+            rejectedBy: "Super Admin",
+            rejectedByRole: "admin",
+            assignedTo: null,
+            assignedTeamId: null,
+            assignedTeamName: null,
+            fieldStatus: null,
+            workflowState: "PENDING",
+            assignment: null,
+            updatedAt: nowStr
+          });
+        }
+      } else {
+        // In-memory demo reports fallback
+        const rep = DEMO_REPORTS.find(r => r.id === report.id);
+        if (rep) {
+          rep.status = "REJECTED";
+          rep.rejectionReason = adminRejectionReason;
+          rep.rejectionNote = adminRejectionNote || "";
+          rep.rejectedAt = nowStr;
+          rep.rejectedBy = "Super Admin";
+          rep.rejectedByRole = "admin";
+          rep.assignedTo = null;
+          rep.assignedTeamId = null;
+          rep.assignedTeamName = null;
+          rep.fieldStatus = undefined;
+          rep.workflowState = undefined;
+          rep.assignment = undefined;
+          rep.updatedAt = nowStr;
+        }
+      }
+
+      // 2. Create notification ONLY for the reporting citizen
+      if (report.reporterEmail) {
+        await createNotification(
+          `Your report #${report.id.slice(-6).toUpperCase()} was Reviewed and Rejected`,
+          `Status: Rejected. Reason: ${adminRejectionReason}. ${adminRejectionNote ? `Note: ${adminRejectionNote}` : ""}`,
+          "report_submitted",
+          "citizen",
+          report.reporterEmail,
+          report.id
+        );
+      }
+
+      // Also notify Admin/Municipal users where required
+      await createNotification(
+        `Incident Rejected: #${report.id.slice(-6).toUpperCase()}`,
+        `Incident "${report.title}" has been rejected by Super Admin due to ${adminRejectionReason}.`,
+        "report_submitted",
+        "municipal",
+        "",
+        report.id
+      );
+
+      // Trigger refreshes & close modals
+      setIsAdminRejectionModalOpen(false);
+      onClose();
+      // Trigger update on parent
+      await onUpdateStatus({
+        id: report.id,
+        status: "REJECTED",
+        assignedTo: null,
+        comment: `Report rejected by Admin: ${adminRejectionReason}`,
+        officerName: "Super Admin"
+      });
+    } catch (err) {
+      console.error("Failed to reject report:", err);
+    } finally {
+      setIsSubmittingAdminRejection(false);
+    }
+  };
+
   // Form Fields for status updates (For Admin/Municipality Officer)
   const [statusInput, setStatusInput] = useState<Report["status"]>("Pending");
-  const [assignedToInput, setAssignedToInput] = useState("");
+  const [selectedTeamId, setSelectedTeamId] = useState("");
   const [commentInput, setCommentInput] = useState("");
 
   useEffect(() => {
@@ -54,7 +170,7 @@ export default function ReportDetailsModal({
 
     // Sync form fields with selected report
     setStatusInput(report.status);
-    setAssignedToInput(report.assignedTo || "");
+    setSelectedTeamId(report.assignedTeamId || "");
     setCommentInput("");
     setSelectedFrameIndex(0);
 
@@ -114,7 +230,7 @@ export default function ReportDetailsModal({
       await onUpdateStatus({
         id: report.id,
         status: statusInput,
-        assignedTo: assignedToInput.trim() !== "" ? assignedToInput.trim() : null,
+        assignedTo: selectedTeamId.trim() !== "" ? selectedTeamId.trim() : null,
         comment: commentInput.trim() !== "" ? commentInput.trim() : `Status transitioned to ${statusInput}.`,
         officerName: "Director Marcus Vance"
       });
@@ -139,11 +255,12 @@ export default function ReportDetailsModal({
   };
 
   // Status badge colors
-  const statusColors = {
+  const statusColors: Record<string, string> = {
     Pending: "bg-red-50 text-red-800 border-red-200",
     Assigned: "bg-blue-50 text-blue-800 border-blue-200",
     "In Progress": "bg-amber-50 text-amber-800 border-amber-200",
-    Resolved: "bg-emerald-50 text-emerald-800 border-emerald-200"
+    Resolved: "bg-emerald-50 text-emerald-800 border-emerald-200",
+    REJECTED: "bg-rose-100 text-rose-800 border-rose-300 font-bold"
   };
 
   const isRoadScanner = report.source === "ROAD_SCANNER";
@@ -195,12 +312,12 @@ export default function ReportDetailsModal({
             <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${
               isSos 
                 ? "bg-red-100 text-red-800 border-red-300 font-extrabold" 
-                : statusColors[report.status]
+                : (statusColors[report.status] || "bg-gray-100 text-gray-800 border-gray-300")
             }`}>
               {isSos 
                 ? `${isHindi ? "गंभीर" : "CRITICAL"} / ${isHindi ? (report.status === "Pending" ? "लंबित" : report.status === "Assigned" ? "आवंटित" : report.status === "In Progress" ? "प्रगति पर" : "हल हुआ") : report.status.toUpperCase()}`
                 : isHindi 
-                ? (report.status === "Pending" ? "लंबित" : report.status === "Assigned" ? "आवंटित" : report.status === "In Progress" ? "प्रगति पर" : "हल हुआ") 
+                ? (report.status === "Pending" ? "लंबित" : report.status === "Assigned" ? "आवंटित" : report.status === "In Progress" ? "प्रगति पर" : report.status === "REJECTED" ? "अस्वीकृत" : "हल हुआ") 
                 : report.status}
             </span>
           </div>
@@ -408,6 +525,38 @@ export default function ReportDetailsModal({
                 </div>
               ) : (
                 <p className="text-xs text-gray-600 leading-relaxed max-h-36 overflow-y-auto">{report.description}</p>
+              )}
+
+              {/* ADMIN REJECTION DETAILS PANEL (Requirement 5) */}
+              {report.status === "REJECTED" && (
+                <div className="mt-4 p-4 rounded-xl bg-red-50 border border-red-200 text-left text-xs space-y-2">
+                  <div className="flex items-center gap-2 text-red-800 font-extrabold uppercase text-[10px] tracking-wider">
+                    <AlertTriangle className="w-4 h-4 text-red-600 animate-pulse" />
+                    <span>This Report has been REJECTED</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-700">
+                    <div>
+                      <span className="font-bold text-slate-500 block text-[9.5px] uppercase">Rejection Reason</span>
+                      <span className="font-extrabold text-slate-900">{report.rejectionReason || "N/A"}</span>
+                    </div>
+                    <div>
+                      <span className="font-bold text-slate-500 block text-[9.5px] uppercase">Rejected By</span>
+                      <span className="font-extrabold text-slate-900">{report.rejectedBy || "N/A"} ({report.rejectedByRole || "admin"})</span>
+                    </div>
+                    <div className="col-span-2">
+                      <span className="font-bold text-slate-500 block text-[9.5px] uppercase">Rejected At</span>
+                      <span className="font-mono text-slate-800">{report.rejectedAt ? new Date(report.rejectedAt).toLocaleString() : "N/A"}</span>
+                    </div>
+                    {report.rejectionNote && (
+                      <div className="col-span-2 pt-1 border-t border-red-200/60 mt-1">
+                        <span className="font-bold text-slate-500 block text-[9.5px] uppercase">Additional Note / Explanation</span>
+                        <p className="text-slate-800 mt-0.5 leading-relaxed bg-white/70 p-2.5 rounded-lg border border-red-100 font-medium">
+                          {report.rejectionNote}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
               )}
               
               <div className="flex flex-col gap-2 border-t border-slate-200 pt-3 mt-2 text-slate-500 font-medium">
@@ -936,13 +1085,13 @@ export default function ReportDetailsModal({
                     </label>
                     <select
                       id="assign-crew-select"
-                      value={assignedToInput}
-                      onChange={(e) => setAssignedToInput(e.target.value)}
+                      value={selectedTeamId}
+                      onChange={(e) => setSelectedTeamId(e.target.value)}
                       className="w-full bg-white border border-gray-200 px-3 py-2 rounded-lg text-slate-800 shadow-2xs focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-xs font-semibold"
                     >
                       <option value="">{isHindi ? "-- कोई दल आवंटित नहीं --" : "-- Unassigned --"}</option>
                       {DEFAULT_FIELD_TEAMS.map((team) => (
-                        <option key={team.id} value={team.name}>
+                        <option key={team.id} value={team.id}>
                           {team.name} ({team.district} • {team.availability})
                         </option>
                       ))}
@@ -966,24 +1115,38 @@ export default function ReportDetailsModal({
                   </div>
 
                   {/* Apply actions */}
-                  <button
-                    id="submit-status-update-btn"
-                    type="submit"
-                    disabled={updating}
-                    className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-bold py-2 rounded-lg shadow-sm hover:shadow transition-all flex items-center justify-center gap-2 font-sans cursor-pointer"
-                  >
-                    {updating ? (
-                      <>
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        <span>{isHindi ? "रिकॉर्ड अपडेट हो रहा है..." : "Updating Operational Records..."}</span>
-                      </>
-                    ) : (
-                      <>
-                        <span>{isHindi ? "स्थिति बदलाव लागू करें" : "Apply Status modifications"}</span>
-                        <ArrowRight className="w-4 h-4" />
-                      </>
+                  <div className="flex flex-col sm:flex-row gap-2 mt-2">
+                    <button
+                      id="submit-status-update-btn"
+                      type="submit"
+                      disabled={updating}
+                      className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-bold py-2 px-3 rounded-lg shadow-sm hover:shadow transition-all flex items-center justify-center gap-2 font-sans cursor-pointer text-xs"
+                    >
+                      {updating ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>{isHindi ? "रिकॉर्ड अपडेट हो रहा है..." : "Updating..."}</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>{isHindi ? "स्थिति बदलाव लागू करें" : "Apply Modifications"}</span>
+                          <ArrowRight className="w-4 h-4" />
+                        </>
+                      )}
+                    </button>
+
+                    {report.status !== "Resolved" && report.status !== "REJECTED" && (
+                      <button
+                        id="reject-report-btn"
+                        type="button"
+                        onClick={() => setIsAdminRejectionModalOpen(true)}
+                        className="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-bold py-2 px-3 rounded-lg shadow-sm hover:shadow transition-all flex items-center justify-center gap-2 font-sans cursor-pointer text-xs"
+                      >
+                        <AlertOctagon className="w-4 h-4 text-red-600" />
+                        <span>{isHindi ? "रिपोर्ट खारिज करें" : "Reject Report"}</span>
+                      </button>
                     )}
-                  </button>
+                  </div>
 
                 </form>
               </div>
@@ -1103,6 +1266,93 @@ export default function ReportDetailsModal({
                   className="px-4 py-2 text-xs font-semibold bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white rounded-lg transition shadow-xs cursor-pointer"
                 >
                   {resolutionProcessing ? (isHindi ? "वापस भेजा जा रहा है..." : "Returning...") : (isHindi ? "पुनः कार्य हेतु भेजें" : "Send Back for Rework")}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {/* MODAL: ADMIN REPORT REJECTION CONFIRMATION (Requirement 2) */}
+        {isAdminRejectionModalOpen && (
+          <div className="fixed inset-0 z-60 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-2xl max-w-md w-full space-y-4 text-left">
+              <div className="flex items-center gap-2 text-red-700 font-bold text-sm">
+                <AlertOctagon className="w-4 h-4 text-red-600 animate-pulse" />
+                <span>Reject Report #{report.id.slice(-6).toUpperCase()}?</span>
+              </div>
+              <p className="text-xs text-slate-500">
+                Are you sure you want to reject this report? This will remove the report from active municipal dispatches, audit queues, and field rosters. The report record will be archived permanently.
+              </p>
+
+              <div className="space-y-3 text-xs">
+                <div>
+                  <span className="text-[10px] font-bold text-slate-400 block uppercase">Issue Title</span>
+                  <span className="font-extrabold text-slate-800 text-xs block truncate mt-0.5">{report.title}</span>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    Rejection Reason *
+                  </label>
+                  <select
+                    value={adminRejectionReason}
+                    onChange={(e) => setAdminRejectionReason(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-800 font-semibold cursor-pointer text-xs"
+                    required
+                  >
+                    <option value="">-- Select Rejection Reason --</option>
+                    <option value="Duplicate Report font-medium">Duplicate Report</option>
+                    <option value="Invalid / Insufficient Evidence">Invalid / Insufficient Evidence</option>
+                    <option value="False or Spam Report">False or Spam Report</option>
+                    <option value="Issue Already Resolved">Issue Already Resolved</option>
+                    <option value="Not a Municipal Issue">Not a Municipal Issue</option>
+                    <option value="Outside Service Area">Outside Service Area</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    Additional Note / Explanation (Optional)
+                  </label>
+                  <textarea
+                    rows={3}
+                    placeholder="Provide additional details regarding the rejection..."
+                    value={adminRejectionNote}
+                    onChange={(e) => setAdminRejectionNote(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-800 focus:outline-hidden focus:border-red-500 text-xs font-medium"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsAdminRejectionModalOpen(false);
+                    setAdminRejectionReason("");
+                    setAdminRejectionNote("");
+                  }}
+                  className="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isSubmittingAdminRejection || !adminRejectionReason}
+                  onClick={handleConfirmAdminRejection}
+                  className="px-4 py-2 text-xs font-semibold bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white rounded-lg transition shadow-xs cursor-pointer flex items-center gap-1.5"
+                >
+                  {isSubmittingAdminRejection ? (
+                    <>
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      <span>Rejecting...</span>
+                    </>
+                  ) : (
+                    <>
+                      <AlertOctagon className="w-3.5 h-3.5 text-white" />
+                      <span>Confirm Rejection</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>

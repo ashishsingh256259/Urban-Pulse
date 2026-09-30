@@ -215,7 +215,7 @@ export type ReportCategory =
   | "Vandals / Graffiti" 
   | "Other";
 
-export type ReportStatus = "Pending" | "Assigned" | "In Progress" | "Resolved";
+export type ReportStatus = "Pending" | "Assigned" | "In Progress" | "Resolved" | "REJECTED";
 
 export type ReportSource = "MANUAL_REPORT" | "ROAD_SCANNER";
 
@@ -251,6 +251,8 @@ export interface Report {
   reporterEmail: string;
   reporterName?: string;
   assignedTo: string | null;
+  assignedTeamId?: string | null;
+  assignedTeamName?: string | null;
   source?: ReportSource;
   roadScanId?: string;
   clusterCount?: number;
@@ -272,6 +274,11 @@ export interface Report {
   unsafeConditions?: UnsafeConditionReport[];
   isSos?: boolean;
   emergencyType?: string;
+  rejectionReason?: string;
+  rejectionNote?: string;
+  rejectedAt?: string;
+  rejectedBy?: string;
+  rejectedByRole?: string;
   createdAt: string;
   updatedAt: string;
   aiAnalysis: AIAnalysis | null;

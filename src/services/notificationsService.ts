@@ -1,8 +1,20 @@
 import { handleFirestoreError, OperationType } from "../lib/firestore_errors";
-import { setDoc } from "firebase/firestore";
-import { collection, query, where, onSnapshot, doc, updateDoc, writeBatch, orderBy, limit } from "firebase/firestore";
-import { db } from "../lib/firebase";
+import { setDoc, collection, query, where, onSnapshot, doc, updateDoc, writeBatch, limit } from "firebase/firestore";
+import { db, stripUndefinedDeep } from "../lib/firebase";
 import { Notification } from "../types";
+
+const parseIsoDate = (raw: any): string => {
+  if (!raw) return new Date().toISOString();
+  if (typeof raw === "string") return raw;
+  if (typeof raw.toDate === "function") {
+    try { return raw.toDate().toISOString(); } catch {}
+  }
+  if (typeof raw.seconds === "number") {
+    try { return new Date(raw.seconds * 1000).toISOString(); } catch {}
+  }
+  if (raw instanceof Date) return raw.toISOString();
+  return new Date().toISOString();
+};
 
 export function subscribeToNotifications(
   userEmail: string,
@@ -47,7 +59,7 @@ export function subscribeToNotifications(
         relatedReportId: data.relatedReportId || data.reportId || undefined,
         incidentId: data.incidentId || data.reportId || undefined,
         read: Boolean(data.read ?? data.read_status),
-        createdAt: data.createdAt || new Date().toISOString()
+        createdAt: parseIsoDate(data.createdAt)
       } as Notification;
     });
 
@@ -91,7 +103,12 @@ export function subscribeToNotifications(
       if (resp.ok) {
         const data = await resp.json();
         if (Array.isArray(data.notifications)) {
-          callback(data.notifications);
+          const parsed = data.notifications.map((n: any) => ({
+            ...n,
+            createdAt: parseIsoDate(n.createdAt)
+          }));
+          parsed.sort((a: Notification, b: Notification) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          callback(parsed);
         }
       }
     } catch (apiErr) {
@@ -162,15 +179,15 @@ export async function createNotification(
   title: string,
   message: string,
   type: string,
-  recipientRole: "citizen" | "admin" | "municipal" | "all",
+  recipientRole: "citizen" | "admin" | "municipal" | "field_team" | "all",
   recipientEmail: string = "",
   reportId: string = "SYSTEM"
 ): Promise<void> {
   if (!db) return;
   try {
-    const notifId = `notif_${Date.now()}`;
+    const notifId = `notif_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const notifRef = doc(db, "notifications", notifId);
-    await setDoc(notifRef, {
+    await setDoc(notifRef, stripUndefinedDeep({
       id: notifId,
       title,
       message,
@@ -180,7 +197,7 @@ export async function createNotification(
       reportId,
       read: false,
       createdAt: new Date().toISOString()
-    });
+    }));
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, "notifications");
   }

@@ -44,7 +44,7 @@ import {
   MapPin, AlertOctagon, CheckSquare, Clock, ArrowRight, Save, User as UserIcon, Lock, Landmark, Sparkles, AlertCircle, Loader2, LogIn, UserPlus, Mail,
   Terminal, Activity, Columns, Bell, LogOut, RefreshCw, Menu, X, Check, Laptop, ChevronRight, ChevronDown, Compass, Wind, LayoutDashboard, BarChart3,
   Camera, Navigation, Award, AlertTriangle, ShieldCheck, FileText, Wrench, Shield,
-  Users, Briefcase, Server, Settings, Radio, Send
+  Users, Briefcase, Settings, Radio, Send
 } from "lucide-react";
 
 
@@ -158,7 +158,7 @@ export default function App() {
   // High-fidelity sidebar terminal states
   const [activeTerminal, setActiveTerminal] = useState<"citizen" | "admin" | "field_team" | "split">("citizen");
   const [activeSubTab, setActiveSubTab] = useState<
-    "citizen-home" | "my-reports" | "municipal-home" | "command-center" | "citizen-signals" | "incident-intelligence" | "field-verification" | "infrastructure" | "dispatch-management" | "road-scanner" | "candidate-review" | "safe-route" | "rewards" | "emergency-sos" | "copilot" | "analytics" | "digital-twin" | "safety" | "traffic" | "environmental" | "emergency" | "field-operations" | "admin-panel" | "admin-users" | "admin-teams" | "admin-system" | "admin-audit" | "admin-settings" | "audit-logs"
+    "citizen-home" | "my-reports" | "municipal-home" | "command-center" | "citizen-signals" | "incident-intelligence" | "field-verification" | "infrastructure" | "dispatch-management" | "road-scanner" | "candidate-review" | "safe-route" | "rewards" | "emergency-sos" | "copilot" | "analytics" | "digital-twin" | "safety" | "traffic" | "environmental" | "emergency" | "field-operations" | "admin-panel" | "admin-users" | "admin-teams" | "admin-settings"
   >("citizen-home");
 
   // On mount and role change, reset to correct home
@@ -190,7 +190,7 @@ export default function App() {
     } else if (currentUser.role === "citizen") {
       const forbiddenForCitizen = [
         "field-operations", "command-center", "citizen-signals", "incident-intelligence", "field-verification", "municipal-home", "dispatch-management", "admin-panel", 
-        "admin-users", "admin-teams", "admin-system", "admin-audit", "admin-settings", "audit-logs",
+        "admin-users", "admin-teams", "admin-settings",
         "rewards", "copilot"
       ];
       if (forbiddenForCitizen.includes(activeSubTab)) {
@@ -205,7 +205,7 @@ export default function App() {
       }
     } else if (currentUser.role === "municipal") {
       const forbiddenForMunicipal = [
-        "admin-panel", "admin-users", "admin-teams", "admin-system", "admin-audit", "admin-settings", "audit-logs", "field-operations"
+        "admin-panel", "admin-users", "admin-teams", "admin-settings", "field-operations"
       ];
       if (forbiddenForMunicipal.includes(activeSubTab)) {
         setActiveSubTab(activeSubTab === "field-operations" ? "dispatch-management" : "command-center");
@@ -264,43 +264,65 @@ export default function App() {
     }
   }, [currentUser?.id, currentUser?.role]);
 
-  // Subscribe to real-time reports from Firestore
+  // Subscribe to real-time reports from Firestore immediately on mount
   useEffect(() => {
-    if (!currentUser) return;
     setLoadingReports(true);
-    const unsubReports = subscribeToReports((fetchedReports) => {
-      if (!initialReportsLoadedRef.current) {
-        initialReportsLoadedRef.current = true;
-        fetchedReports.forEach(r => knownReportIdsRef.current.add(r.id));
-      } else {
-        // Detect newly arrived report while user is on dashboard
-        const newlyArrived = fetchedReports.find(r => !knownReportIdsRef.current.has(r.id));
-        if (newlyArrived) {
-          knownReportIdsRef.current.add(newlyArrived.id);
-          if (currentUser?.role === "admin" || currentUser?.role === "municipal") {
-            setNewReportToast({
-              id: newlyArrived.id,
-              title: newlyArrived.title || "Citizen Issue Reported",
-              category: newlyArrived.category || "General",
-              location: newlyArrived.location || "City Location",
-              severity: newlyArrived.severity
-            });
+    const unsubReports = subscribeToReports(
+      (fetchedReports) => {
+        if (!initialReportsLoadedRef.current) {
+          initialReportsLoadedRef.current = true;
+          fetchedReports.forEach(r => knownReportIdsRef.current.add(r.id));
+        } else {
+          // Detect newly arrived report while user is on dashboard
+          const newlyArrived = fetchedReports.find(r => !knownReportIdsRef.current.has(r.id));
+          if (newlyArrived) {
+            knownReportIdsRef.current.add(newlyArrived.id);
+            if (currentUser?.role === "admin" || currentUser?.role === "municipal") {
+              setNewReportToast({
+                id: newlyArrived.id,
+                title: newlyArrived.title || "Citizen Issue Reported",
+                category: newlyArrived.category || "General",
+                location: newlyArrived.location || "City Location",
+                severity: newlyArrived.severity
+              });
+            }
           }
+          fetchedReports.forEach(r => knownReportIdsRef.current.add(r.id));
         }
-        fetchedReports.forEach(r => knownReportIdsRef.current.add(r.id));
-      }
 
-      setReports(fetchedReports);
-      setLoadingReports(false);
-    });
-    const unsubNotifs = subscribeToNotifications(currentUser.email, currentUser.role as any, (fetchedNotifs) => {
-      setNotifications(fetchedNotifs);
-    });
+        setReports(fetchedReports);
+        setLoadingReports(false);
+      },
+      (quotaError) => {
+        console.warn("Firestore reports subscription error:", quotaError);
+        setLoadingReports(false);
+      }
+    );
+
     return () => {
       unsubReports();
+    };
+  }, [currentUser?.role]);
+
+  // Subscribe to real-time user-specific notifications when authenticated
+  useEffect(() => {
+    if (!currentUser?.email) {
+      setNotifications([]);
+      return;
+    }
+
+    const unsubNotifs = subscribeToNotifications(
+      currentUser.email,
+      (currentUser.role as any) || "citizen",
+      (fetchedNotifs) => {
+        setNotifications(fetchedNotifs);
+      }
+    );
+
+    return () => {
       unsubNotifs();
     };
-  }, [currentUser?.id, currentUser?.email, currentUser?.role]);
+  }, [currentUser?.email, currentUser?.role]);
 
   const syncOperationalDatasets = (email: string, role: string) => {
     // Left empty deliberately if components still call it, as subscription is moved to useEffect
@@ -664,8 +686,6 @@ export default function App() {
     {
       title: t("nav.securityGov", "SECURITY & GOVERNANCE"),
       items: [
-        { id: "admin-system", label: t("nav.systemHealth", "System Health"), desc: t("nav.systemHealthDesc", "Platform runtime metrics"), icon: Server },
-        { id: "admin-audit", label: t("nav.auditTrail", "Audit Trail"), desc: t("nav.auditTrailDesc", "Immutable security ledger"), icon: FileText },
         { id: "admin-settings", label: t("nav.platformSettings", "Platform Settings"), desc: t("nav.platformSettingsDesc", "Global system policies"), icon: Settings },
       ]
     }
@@ -1257,72 +1277,8 @@ export default function App() {
 
             {/* Workspace Area */}
             <main className="flex-1 p-3.5 sm:p-5 lg:p-6 flex flex-col gap-4 bg-[#F5F7FB] text-slate-900 transition-colors">
-              <div className="bg-white border border-[#E2E8F0] p-4 sm:p-5 rounded-2xl shadow-xs text-left transition-colors">
-                <div className="flex items-center gap-2.5">
-                  <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${
-                    activeSubTab !== "infrastructure"
-                      ? "bg-[#2563EB]"
-                      : activeTerminal === 'split' ? 'bg-[#7C3AED]' : activeTerminal === 'admin' ? 'bg-[#F59E0B]' : 'bg-[#2563EB]'
-                  }`} />
-                  <h1 className="text-lg sm:text-xl font-sans font-extrabold text-[#172033] tracking-tight">
-                    {activeSubTab === "citizen-home" && (isHindi ? "नागरिक सुरक्षा डैशबोर्ड" : "Citizen Safety Dashboard")}
-                    {activeSubTab === "my-reports" && (isHindi ? "मेरी दर्ज की गई रिपोर्टें" : "My Submitted Reports")}
-                    {activeSubTab === "municipal-home" && (isHindi ? "नगर निगम कमान अवलोकन" : "Municipal Command Overview")}
-                    {activeSubTab === "dispatch-management" && (isHindi ? "कार्य आवंटन एवं प्रेषण प्रबंधन" : "Municipal Dispatch & Work Order Control")}
-                    {activeSubTab === "command-center" && (isHindi ? "शहर कमान एवं नियंत्रण केंद्र" : "City Command & Control Center")}
-                    {activeSubTab === "analytics" && (isHindi ? "शहर विश्लेषण डैशबोर्ड" : "Executive City Analytics Dashboard")}
-                    {activeSubTab === "digital-twin" && (isHindi ? "डिजिटल ट्विन मॉडल" : "Smart City Digital Twin")}
-                    {activeSubTab === "admin-panel" && (isHindi ? "प्रशासन एवं नियंत्रण" : "Administration & Platform Governance")}
-                    {activeSubTab === "admin-users" && (isHindi ? "उपयोगकर्ता प्रबंधन" : "User Governance & Access Clearances")}
-                    {activeSubTab === "admin-teams" && (isHindi ? "फील्ड टीम प्रबंधन" : "Field Squad & Team Management")}
-                    {activeSubTab === "admin-system" && (isHindi ? "सिस्टम स्थिति" : "Platform System Health & Runtime Metrics")}
-                    {activeSubTab === "admin-audit" && (isHindi ? "सुरक्षा ऑडिट लॉग" : "Platform Audit Trail & Security Ledger")}
-                    {activeSubTab === "admin-settings" && (isHindi ? "प्लेटफॉर्म सेटिंग्स" : "Platform Settings & Governance Policies")}
-                    {activeSubTab === "audit-logs" && (isHindi ? "ऑडिट लॉग" : "Platform Audit Log Ledger")}
-                    {activeSubTab === "infrastructure" && (
-                      activeTerminal === "citizen" 
-                        ? (isHindi ? "समस्या दर्ज करें" : "Citizen Report Dashboard") 
-                        : (isHindi ? "नगर निगम प्रेषण टर्मिनल" : "Municipal Dispatch Terminal")
-                    )}
-                    {activeSubTab === "copilot" && (isHindi ? "एआई सहायक" : "AI Assistant")}
-                    {activeSubTab === "safety" && (isHindi ? "शहरी जोखिम मानचित्र" : "Urban Heatmap Grid & Risk Diagnostics")}
-                    {activeSubTab === "traffic" && (isHindi ? "यातायात नियंत्रण" : "Smart Traffic Control Center")}
-                    {activeSubTab === "environmental" && (isHindi ? "पर्यावरण निगरानी" : "Clean Air Control Centre")}
-                    {activeSubTab === "emergency" && (isHindi ? "आपातकालीन सेवाएं" : "Emergency Services Control Center")}
-                    {activeSubTab === "field-operations" && (isHindi ? "फील्ड संचालन डेक" : "Field Operations & Maintenance Deck")}
-                  </h1>
-                </div>
-                <p className="text-xs text-[#64748B] mt-1 max-w-3xl leading-relaxed font-sans">
-                  {activeSubTab === "citizen-home" && (isHindi ? "नागरिक सुरक्षा एवं रिपोर्टिंग डैशबोर्ड में आपका स्वागत है।" : "Welcome to your UrbanPulse safety and reporting dashboard.")}
-                  {activeSubTab === "my-reports" && (isHindi ? "अपनी दर्ज की गई समस्याओं की स्थिति एवं समाधान ट्रैक करें।" : "Track real-time remediation status, dispatch assignments, and resolution notes for your submitted issues.")}
-                  {activeSubTab === "municipal-home" && (isHindi ? "सक्रिय महानगरीय क्षेत्रों में नगर निगम संचालन का समग्र अवलोकन।" : "High-level command overview for UrbanPulse municipal operations across active metropolitan domains.")}
-                  {activeSubTab === "dispatch-management" && (isHindi ? "फील्ड टीम असाइनमेंट, समाधान समय सीमा और कार्य आदेश प्रबंधित करें।" : "Coordinate field squad assignments, set SLA response windows, inspect resolution evidence, and approve work orders.")}
-                  {activeSubTab === "admin-panel" && (isHindi ? "उपयोगकर्ता, टीम प्रबंधन और प्लेटफॉर्म नीतियों के लिए प्रशासन कंसोल।" : "Enterprise administration console for user provisioning, team management, role authorizations, and platform policies.")}
-                  {activeSubTab === "admin-users" && (isHindi ? "पंजीकृत उपयोगकर्ताओं और भूमिकाओं का प्रबंधन करें।" : "Manage registered users, inspect identity credentials, and grant role-based security clearances.")}
-                  {activeSubTab === "admin-teams" && (isHindi ? "फील्ड प्रतिक्रिया टीमों और उनके परिचालन क्षेत्रों का प्रबंधन करें।" : "Manage municipal field response teams, squad leads, assigned operational zones, and active statuses.")}
-                  {activeSubTab === "admin-system" && (isHindi ? "सिस्टम प्रदर्शन और सर्वर स्वास्थ्य की निगरानी करें।" : "Monitor real-time system performance, model inference status, cache metrics, and server runtime health.")}
-                  {activeSubTab === "admin-audit" && (isHindi ? "प्रशासनिक एवं फील्ड परिचालन गतिविधियों का सुरक्षा लॉग।" : "Audit log tracking all administrative, dispatch, and field operational events.")}
-                  {activeSubTab === "admin-settings" && (isHindi ? "प्लेटफॉर्म पैरामीटर और वैश्विक नीतियां कॉन्फ़िगर करें।" : "Configure platform parameters, dispatch SLA limits, GPS verification thresholds, and global security policies.")}
-                  {activeSubTab === "audit-logs" && (isHindi ? "प्रशासनिक एवं फील्ड परिचालन गतिविधियों का सुरक्षा लॉग।" : "Audit log tracking all administrative, dispatch, and field operational events.")}
-                  {activeSubTab === "field-operations" && (isHindi ? "सौंपे गए कार्यों को देखें, मरम्मत प्रमाण अपलोड करें और कार्य पूर्ण करें।" : "Mobile field operations deck for utility & road maintenance squads. Manage assigned incidents, execute GPS site verification, capture repair evidence, and submit resolutions.")}
-                  {activeSubTab === "command-center" && (isHindi ? "सक्रिय शिकायतों, शहर सुरक्षा रेटिंग और प्रेषण योजना का कमान केंद्र।" : "Operations workspace providing metrics of active complaints, city operational safety ratings, and direct dispatcher planning tools across the municipal grid.")}
-                  {activeSubTab === "analytics" && (isHindi ? "समस्या वृद्धि प्रतिशत और विभाग प्रदर्शन सूचकांक।" : "City analytics tracking issue growth percentages, department performance indices, and specific ward standings across metropolitan sectors.")}
-                  {activeSubTab === "digital-twin" && (isHindi ? "शहरी बुनियादी ढांचे, यातायात और सुरक्षा मापदंडों का त्रि-आयामी नक्शा।" : "Interactive vector city map displaying real-time infrastructure, traffic speed, safety, AQI, and composite risk parameters mapped live.")}
-                  {activeSubTab === "infrastructure" && (
-                    activeTerminal === "citizen" 
-                      ? (isHindi ? "फोटो जोड़ें, समस्या बताएं और शहर के बुनियादी ढांचे को सुधारने में मदद करें।" : "Take photos, input hazard parameters, and witness instant AI categorization mapped across active metropolitan sectors.")
-                      : (isHindi ? "नगर निगम रिपोर्ट फ़िल्टर करें और फील्ड टीमों को कार्य सौंपें।" : "Filter municipal reports down to wards, examine diagnostic scores, and assign utility dispatch fleets.")
-                  )}
-                  {activeSubTab === "copilot" && (isHindi ? "शहरी समस्याओं के बारे में प्रश्न पूछें या प्राथमिकता सुझाव प्राप्त करें।" : "Ask questions about regional hazards, or request recommended response priorities.")}
-                  {activeSubTab === "safety" && (isHindi ? "शहरी क्षेत्रों में जोखिम और अंधेरे रास्तों का स्थानीय मानचित्र।" : "GIS mapping system with localized micro-overlays, assessing probabilities of structural faults, dark streets, and hazards across municipal domains.")}
-                  {activeSubTab === "traffic" && (isHindi ? "यातायात प्रवाह गति और सड़क अवरोधों की निगरानी।" : "Traffic flow speeds, road obstructions, and proposing lane adjustments and dynamic speed controls.")}
-                  {activeSubTab === "environmental" && (isHindi ? "वायु गुणवत्ता और प्रदूषण संकेतकों की वास्तविक समय ट्रैकिंग।" : "Monitoring air indicators, with real-time AQI feedback and particulate density tracking across sectors.")}
-                  {activeSubTab === "emergency" && (isHindi ? "आपातकालीन वाहन मार्ग और त्वरित सहायता प्राथमिकताएं।" : "Continuous transit routing, determining hazard bypass coordinates and dispatcher assignment priorities for hospital responder lanes.")}
-                </p>
-              </div>
-
-            {/* DESIGN THINKING LOOP PHILOSOPHY TRACK FOR MUNICIPAL & ADMIN */}
-            {(currentUser.role === "municipal" || currentUser.role === "admin") && (
+            {/* DESIGN THINKING LOOP PHILOSOPHY TRACK FOR MUNICIPAL ONLY */}
+            {currentUser.role === "municipal" && !["admin-panel", "admin-users", "admin-teams", "admin-settings"].includes(activeSubTab) && (
               <MunicipalDesignLoopHeader
                 activeTab={activeSubTab}
                 onSelectTab={(tab) => setActiveSubTab(tab as any)}
@@ -1434,11 +1390,11 @@ export default function App() {
                         </p>
                       </div>
                       <span className="text-xs font-bold font-mono px-3 py-1.5 bg-[#EFF6FF] text-[#2563EB] border border-[#DBEAFE] rounded-full self-start sm:self-auto">
-                        {reports.filter(r => r.reporterEmail === currentUser.email).length} {isHindi ? "कुल रिपोर्टें" : "Total Submissions"}
+                        {reports.filter(r => (currentUser.email && r.reporterEmail?.toLowerCase() === currentUser.email.toLowerCase()) || (currentUser.id && r.userId === currentUser.id)).length} {isHindi ? "कुल रिपोर्टें" : "Total Submissions"}
                       </span>
                     </div>
 
-                    {reports.filter(r => r.reporterEmail === currentUser.email).length === 0 ? (
+                    {reports.filter(r => (currentUser.email && r.reporterEmail?.toLowerCase() === currentUser.email.toLowerCase()) || (currentUser.id && r.userId === currentUser.id)).length === 0 ? (
                       <div className="p-12 text-center border-2 border-dashed border-[#E2E8F0] rounded-2xl">
                         <div className="w-12 h-12 rounded-2xl bg-[#EFF6FF] text-[#2563EB] flex items-center justify-center mx-auto mb-3">
                           <FileText className="w-6 h-6" />
@@ -1460,7 +1416,7 @@ export default function App() {
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {reports.filter(r => r.reporterEmail === currentUser.email).map((rep) => (
+                        {reports.filter(r => (currentUser.email && r.reporterEmail?.toLowerCase() === currentUser.email.toLowerCase()) || (currentUser.id && r.userId === currentUser.id)).map((rep) => (
                           <div
                             key={rep.id}
                             onClick={() => setSelectedReport(rep)}
@@ -1504,7 +1460,7 @@ export default function App() {
             )}
 
             {/* CENTRAL ADMINISTRATIVE CONSOLE & GOVERNANCE SUITE */}
-            {(["admin-panel", "admin-users", "admin-teams", "admin-system", "admin-audit", "admin-settings", "audit-logs"].includes(activeSubTab)) && (
+            {(["admin-panel", "admin-users", "admin-teams", "admin-settings"].includes(activeSubTab)) && (
               <RoleGuard allowedRoles={["admin"]}>
                 <div className="w-full">
                   <AdminPanel
@@ -1513,16 +1469,12 @@ export default function App() {
                     initialTab={
                       activeSubTab === "admin-users" ? "users" :
                       activeSubTab === "admin-teams" ? "teams" :
-                      activeSubTab === "admin-system" ? "system" :
-                      (activeSubTab === "admin-audit" || activeSubTab === "audit-logs") ? "audit" :
                       activeSubTab === "admin-settings" ? "settings" :
                       "overview"
                     }
                     onTabChange={(newTab) => {
                       if (newTab === "users") setActiveSubTab("admin-users");
                       else if (newTab === "teams") setActiveSubTab("admin-teams");
-                      else if (newTab === "system") setActiveSubTab("admin-system");
-                      else if (newTab === "audit") setActiveSubTab("admin-audit");
                       else if (newTab === "settings") setActiveSubTab("admin-settings");
                       else setActiveSubTab("admin-panel");
                     }}
@@ -1771,17 +1723,17 @@ export default function App() {
                     <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-100">
                       <h4 className="font-display font-bold text-xs text-slate-800">Self Reported Submissions</h4>
                       <span className="text-[9px] font-bold bg-slate-100 px-1.5 py-0.5 rounded text-slate-500">
-                        Total: {reports.filter(r => r.reporterEmail === currentUser.email).length}
+                        Total: {reports.filter(r => (currentUser.email && r.reporterEmail?.toLowerCase() === currentUser.email.toLowerCase()) || (currentUser.id && r.userId === currentUser.id)).length}
                       </span>
                     </div>
 
                     <div className="flex flex-col gap-2 max-h-[160px] overflow-y-auto pr-1">
-                      {reports.filter(r => r.reporterEmail === currentUser.email).length === 0 ? (
+                      {reports.filter(r => (currentUser.email && r.reporterEmail?.toLowerCase() === currentUser.email.toLowerCase()) || (currentUser.id && r.userId === currentUser.id)).length === 0 ? (
                         <div className="p-6 text-center text-slate-400 border border-dashed border-slate-150 rounded-lg text-[10.5px]">
                           No self-reported cases lodged.
                         </div>
                       ) : (
-                        reports.filter(r => r.reporterEmail === currentUser.email).map((rep) => (
+                        reports.filter(r => (currentUser.email && r.reporterEmail?.toLowerCase() === currentUser.email.toLowerCase()) || (currentUser.id && r.userId === currentUser.id)).map((rep) => (
                           <div
                             key={rep.id}
                             onClick={() => setSelectedReport(rep)}

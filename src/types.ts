@@ -7,6 +7,7 @@ export interface User {
   email: string;
   fullName: string;
   role: UserRole;
+  phone?: string;
   active?: boolean;
   department?: string;
   teamId?: string;
@@ -28,6 +29,7 @@ export interface UserProfile {
   name: string;
   fullName?: string;
   role: UserRole;
+  phone?: string;
   active?: boolean;
   department?: string;
   teamId?: string;

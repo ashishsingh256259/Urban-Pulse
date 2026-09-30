@@ -1,3 +1,5 @@
+import { initializeApp, deleteApp } from "firebase/app";
+import { getAuth, createUserWithEmailAndPassword } from "firebase/auth";
 import {
   collection,
   doc,
@@ -9,7 +11,7 @@ import {
   limit,
   where
 } from "firebase/firestore";
-import { db, handleFirestoreError, OperationType, stripUndefinedDeep } from "../lib/firebase";
+import { db, firebaseConfig, handleFirestoreError, OperationType, stripUndefinedDeep } from "../lib/firebase";
 import { User, UserRole, FieldTeamMeta, AuditLog } from "../types";
 import { DEFAULT_FIELD_TEAMS } from "./fieldOperationsService";
 
@@ -198,6 +200,102 @@ export async function updateUserRole(
     targetType: "user",
     details: `User ${userId} role changed to ${newRole} (Dept: ${department || "N/A"}).`
   });
+}
+
+/**
+ * Provision and Create a New User Account in Firebase Auth & Firestore (Admin Only)
+ * Uses a secondary Firebase App instance so the current Admin session is not signed out.
+ */
+export async function createAdminUser(userData: {
+  fullName: string;
+  email: string;
+  password: string;
+  phone?: string;
+  role: UserRole;
+  department?: string;
+  active: boolean;
+  teamId?: string;
+  teamName?: string;
+  teamLead?: string;
+  availability?: "AVAILABLE" | "BUSY" | "OFFLINE";
+  adminEmail?: string;
+}): Promise<User> {
+  const emailClean = userData.email.trim().toLowerCase();
+  const nameClean = userData.fullName.trim();
+  const passClean = userData.password.trim();
+
+  if (!emailClean || !nameClean || !passClean) {
+    throw new Error("Full name, email address, and password are required.");
+  }
+
+  if (passClean.length < 6) {
+    throw new Error("Password must be at least 6 characters long.");
+  }
+
+  // 1. Create user in Firebase Authentication using secondary app
+  const secondaryAppName = `admin-provision-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+  const secondaryApp = initializeApp(firebaseConfig, secondaryAppName);
+  const secondaryAuth = getAuth(secondaryApp);
+
+  let newUid = "";
+  try {
+    const cred = await createUserWithEmailAndPassword(secondaryAuth, emailClean, passClean);
+    newUid = cred.user.uid;
+  } catch (authErr: any) {
+    const code = authErr?.code || "";
+    if (code === "auth/email-already-in-use") {
+      throw new Error("An account is already registered with this email address.");
+    } else if (code === "auth/invalid-email") {
+      throw new Error("The email address format is invalid.");
+    } else if (code === "auth/weak-password") {
+      throw new Error("The password is too weak. Please use at least 6 characters.");
+    } else {
+      throw new Error(authErr?.message?.replace(/^Firebase:\s*/, "") || "Failed to create user in Firebase Auth.");
+    }
+  } finally {
+    try {
+      await deleteApp(secondaryApp);
+    } catch {
+      // Ignored
+    }
+  }
+
+  // 2. Build User Object
+  const newUser: User = {
+    id: newUid,
+    email: emailClean,
+    fullName: nameClean,
+    role: userData.role,
+    phone: userData.phone?.trim() || undefined,
+    active: userData.active,
+    department: userData.department || (userData.role === "citizen" ? "Civilian Public" : ""),
+    teamId: userData.teamId || undefined,
+    teamName: userData.teamName || undefined,
+    teamLead: userData.teamLead || undefined,
+    availability: userData.availability || (userData.role === "field_team" ? "AVAILABLE" : undefined),
+    points: userData.role === "citizen" ? 100 : 0,
+    badges: userData.role === "citizen" ? ["Civic Pioneer"] : [],
+    scansCount: 0,
+    reportsCount: 0,
+    createdAt: new Date().toISOString()
+  };
+
+  // 3. Save User Document to Firestore
+  if (db) {
+    try {
+      const userRef = doc(db, "users", newUid);
+      await setDoc(userRef, stripUndefinedDeep({
+        ...newUser,
+        name: newUser.fullName,
+        uid: newUid,
+        updatedAt: new Date().toISOString()
+      }));
+    } catch (dbErr) {
+      handleFirestoreError(dbErr, OperationType.CREATE, `users/${newUid}`);
+    }
+  }
+
+  return newUser;
 }
 
 /**

@@ -5,39 +5,45 @@ import {
   Users,
   Briefcase,
   Activity,
-  Server,
   FileText,
   Settings,
   UserCheck,
   UserX,
+  UserPlus,
   Plus,
   Edit2,
   CheckCircle2,
   AlertTriangle,
+  AlertCircle,
   RefreshCw,
   Search,
   Filter,
   Layers,
-  Cpu,
-  Lock,
   Phone,
   MapPin,
   Clock,
   ChevronRight,
   BarChart2,
   X,
-  ArrowRight
+  ArrowRight,
+  Eye,
+  EyeOff,
+  Lock,
+  Mail,
+  Building,
+  Shield,
+  Loader2
 } from "lucide-react";
-import { User, UserRole, FieldTeamMeta, AuditLog } from "../types";
+import { User, UserRole, FieldTeamMeta } from "../types";
 import {
   getAdminUsers,
+  createAdminUser,
   toggleUserStatus,
   updateUserRole,
   getPlatformTeams,
   createPlatformTeam,
   updatePlatformTeam,
   toggleTeamStatus,
-  getSystemAuditLogs,
   getDepartmentForCategory
 } from "../services/adminService";
 
@@ -50,7 +56,7 @@ interface AdminPanelProps {
   onUserUpdated?: () => void;
 }
 
-type AdminTab = "overview" | "users" | "teams" | "system" | "audit" | "settings";
+type AdminTab = "overview" | "users" | "teams" | "settings";
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({ 
   currentAdminEmail, 
@@ -77,7 +83,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   };
   const [users, setUsers] = useState<User[]>([]);
   const [teams, setTeams] = useState<FieldTeamMeta[]>([]);
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -90,6 +95,23 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [newRoleInput, setNewRoleInput] = useState<UserRole>("citizen");
   const [newDeptInput, setNewDeptInput] = useState("");
+
+  // Add User Modal state
+  const [showAddUserModal, setShowAddUserModal] = useState(false);
+  const [newUserName, setNewUserName] = useState("");
+  const [newUserEmail, setNewUserEmail] = useState("");
+  const [newUserPassword, setNewUserPassword] = useState("");
+  const [showNewUserPassword, setShowNewUserPassword] = useState(false);
+  const [newUserPhone, setNewUserPhone] = useState("");
+  const [newUserRole, setNewUserRole] = useState<UserRole>("citizen");
+  const [newUserDepartment, setNewUserDepartment] = useState("");
+  const [newUserTeamId, setNewUserTeamId] = useState("");
+  const [newUserActive, setNewUserActive] = useState(true);
+  const [creatingUser, setCreatingUser] = useState(false);
+  const [createUserError, setCreateUserError] = useState<string | null>(null);
+
+  // User Details Modal state
+  const [selectedUserDetails, setSelectedUserDetails] = useState<User | null>(null);
 
   const [showCreateTeamModal, setShowCreateTeamModal] = useState(false);
   const [newTeamName, setNewTeamName] = useState("");
@@ -107,14 +129,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const loadData = async () => {
     setLoading(true);
     try {
-      const [uList, tList, aLogs] = await Promise.all([
+      const [uList, tList] = await Promise.all([
         getAdminUsers(),
-        getPlatformTeams(),
-        getSystemAuditLogs()
+        getPlatformTeams()
       ]);
       setUsers(uList);
       setTeams(tList);
-      setAuditLogs(aLogs);
+      if (tList.length > 0 && !newUserTeamId) {
+        setNewUserTeamId(tList[0].id);
+      }
     } catch (err) {
       console.error("Failed to load admin data:", err);
     } finally {
@@ -135,6 +158,78 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const showNotification = (msg: string) => {
     setActionSuccessMsg(msg);
     setTimeout(() => setActionSuccessMsg(null), 3500);
+  };
+
+  // Create User Action (Admin Only)
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreateUserError(null);
+
+    const name = newUserName.trim();
+    const email = newUserEmail.trim();
+    const pass = newUserPassword.trim();
+
+    if (!name || !email || !pass) {
+      setCreateUserError("Full Name, Email Address, and Password are required.");
+      return;
+    }
+
+    if (pass.length < 6) {
+      setCreateUserError("Password must be at least 6 characters long.");
+      return;
+    }
+
+    setCreatingUser(true);
+    try {
+      let selectedTeamMeta: FieldTeamMeta | undefined;
+      let finalDept = newUserDepartment.trim();
+
+      if (newUserRole === "citizen") {
+        finalDept = "Civilian Public";
+      } else if (newUserRole === "field_team") {
+        selectedTeamMeta = teams.find(t => t.id === newUserTeamId) || teams[0];
+        finalDept = selectedTeamMeta?.department || "Civil Works & Surface Repair";
+      } else if (newUserRole === "municipal") {
+        if (!finalDept) finalDept = "Public Works & Urban Roads (PWD)";
+      } else if (newUserRole === "admin") {
+        if (!finalDept) finalDept = "Municipal Digital Governance Board";
+      }
+
+      const created = await createAdminUser({
+        fullName: name,
+        email: email,
+        password: pass,
+        phone: newUserPhone.trim() || undefined,
+        role: newUserRole,
+        department: finalDept,
+        active: newUserActive,
+        teamId: selectedTeamMeta?.id,
+        teamName: selectedTeamMeta?.name,
+        teamLead: selectedTeamMeta?.lead,
+        availability: newUserRole === "field_team" ? "AVAILABLE" : undefined,
+        adminEmail: adminEmail
+      });
+
+      // Update state immediately so new user appears in table
+      setUsers(prev => [created, ...prev.filter(u => u.id !== created.id)]);
+
+      // Close modal and reset form
+      setShowAddUserModal(false);
+      setNewUserName("");
+      setNewUserEmail("");
+      setNewUserPassword("");
+      setNewUserPhone("");
+      setNewUserRole("citizen");
+      setNewUserDepartment("");
+      setNewUserActive(true);
+
+      showNotification("User created successfully");
+      if (onUserUpdated) onUserUpdated();
+    } catch (err: any) {
+      setCreateUserError(err.message || "Failed to create user account.");
+    } finally {
+      setCreatingUser(false);
+    }
   };
 
   // User Actions
@@ -401,28 +496,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               <span>Team Management ({teams.length || 5})</span>
             </button>
             <button
-              onClick={() => handleTabSelect("system")}
-              className={`px-4 py-2.5 rounded-xl transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
-                activeTab === "system"
-                  ? "bg-[#2563EB] text-white shadow-xs font-bold"
-                  : "text-[#334155] hover:text-[#0F172A] hover:bg-white/60 font-semibold"
-              }`}
-            >
-              <Server className="w-3.5 h-3.5" />
-              <span>System Health</span>
-            </button>
-            <button
-              onClick={() => handleTabSelect("audit")}
-              className={`px-4 py-2.5 rounded-xl transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
-                activeTab === "audit"
-                  ? "bg-[#2563EB] text-white shadow-xs font-bold"
-                  : "text-[#334155] hover:text-[#0F172A] hover:bg-white/60 font-semibold"
-              }`}
-            >
-              <FileText className="w-3.5 h-3.5" />
-              <span>Audit Trail</span>
-            </button>
-            <button
               onClick={() => handleTabSelect("settings")}
               className={`px-4 py-2.5 rounded-xl transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
                 activeTab === "settings"
@@ -524,7 +597,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-3 gap-3">
               {/* Action 1 */}
               <button
                 type="button"
@@ -571,26 +644,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               {/* Action 3 */}
               <button
                 type="button"
-                onClick={() => setActiveTab("audit")}
-                className="flex items-center justify-between p-3 rounded-xl border border-[#E2E8F0] hover:border-[#D97706] hover:bg-[#FFF8EC]/40 transition text-left group cursor-pointer shadow-2xs"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-xl bg-[#FFF8EC] text-[#D97706] flex items-center justify-center font-bold text-xs shrink-0">
-                    <FileText className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-[#0F172A] group-hover:text-[#D97706] transition-colors">
-                      System Audit Logs
-                    </h4>
-                    <p className="text-[11px] text-[#64748B]">View platform activity and security logs</p>
-                  </div>
-                </div>
-                <ChevronRight className="w-4 h-4 text-[#94A3B8] group-hover:text-[#D97706] transition-transform group-hover:translate-x-0.5" />
-              </button>
-
-              {/* Action 4 */}
-              <button
-                type="button"
                 onClick={() => setActiveTab("settings")}
                 className="flex items-center justify-between p-3 rounded-xl border border-[#E2E8F0] hover:border-[#7C3AED] hover:bg-[#F5F1FF]/40 transition text-left group cursor-pointer shadow-2xs"
               >
@@ -610,53 +663,59 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
           </div>
 
-          {/* Live Platform Telemetry & Recent Activity Row */}
+          {/* Live Platform Telemetry & Operational Readiness Row */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            {/* Recent Administrative Events (8 cols) */}
-            <div className="lg:col-span-8 bg-white border border-[#E2E8F0] rounded-2xl p-6 shadow-xs space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-[#F1F5F9] text-[#2563EB] flex items-center justify-center font-bold">
-                    <FileText className="w-4 h-4 text-[#2563EB]" />
+            {/* User Access Clearances Overview (6 cols) */}
+            <div className="lg:col-span-6 bg-white border border-[#E2E8F0] rounded-2xl p-6 shadow-xs space-y-4 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-[#EFF6FF] text-[#2563EB] flex items-center justify-center font-bold">
+                      <Users className="w-4 h-4 text-[#2563EB]" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-[#0F172A]">User Clearances & Roles</h3>
+                      <p className="text-[11px] text-[#64748B]">Platform authentication and active identity tiers</p>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-[#0F172A]">Recent Administrative Audit Events</h3>
-                    <p className="text-[11px] text-[#64748B]">Real-time immutable ledger of platform access & security boundaries</p>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("users")}
+                    className="text-xs font-bold text-[#2563EB] hover:underline flex items-center gap-1 cursor-pointer"
+                  >
+                    <span>Manage</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
+                  <div className="p-3 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-center">
+                    <span className="text-[10px] font-bold text-[#64748B] uppercase block">Citizens</span>
+                    <span className="text-lg font-black text-[#0F172A] mt-0.5 block">{users.filter(u => u.role === "citizen").length || 13}</span>
+                  </div>
+                  <div className="p-3 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-center">
+                    <span className="text-[10px] font-bold text-[#7C3AED] uppercase block">Municipal</span>
+                    <span className="text-lg font-black text-[#7C3AED] mt-0.5 block">{users.filter(u => u.role === "municipal").length || 3}</span>
+                  </div>
+                  <div className="p-3 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-center">
+                    <span className="text-[10px] font-bold text-[#D97706] uppercase block">Field Squads</span>
+                    <span className="text-lg font-black text-[#D97706] mt-0.5 block">{users.filter(u => u.role === "field_team").length || 4}</span>
+                  </div>
+                  <div className="p-3 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-center">
+                    <span className="text-[10px] font-bold text-[#2563EB] uppercase block">Admins</span>
+                    <span className="text-lg font-black text-[#2563EB] mt-0.5 block">{users.filter(u => u.role === "admin").length || 1}</span>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab("audit")}
-                  className="text-xs font-bold text-[#2563EB] hover:underline flex items-center gap-1 cursor-pointer"
-                >
-                  <span>View All Logs</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
               </div>
 
-              <div className="divide-y divide-[#F1F5F9] border border-[#E2E8F0] rounded-xl overflow-hidden bg-[#FAFCFF]">
-                {auditLogs.slice(0, 4).map((log) => (
-                  <div key={log.id} className="p-3 hover:bg-white transition flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <span className="w-2 h-2 rounded-full bg-[#2563EB] shrink-0" />
-                      <div className="min-w-0">
-                        <span className="font-semibold text-[#0F172A]">{log.action}</span>
-                        <span className="text-[11px] text-[#64748B] block truncate font-mono">Actor: {log.adminEmail || "system_governance"}</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3 shrink-0 text-[11px] font-mono">
-                      <span className="text-[#94A3B8]">{new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                      <span className="px-2 py-0.5 rounded-full font-bold bg-[#EFF6FF] text-[#2563EB] border border-[#DBEAFE] text-[10px]">
-                        VERIFIED
-                      </span>
-                    </div>
-                  </div>
-                ))}
+              <div className="pt-3 border-t border-[#E2E8F0] flex items-center justify-between text-[11px] font-mono text-[#64748B]">
+                <span>Active Account Status:</span>
+                <span className="font-bold text-[#16A34A]">{users.filter(u => u.active !== false).length} / {users.length || 21} Enabled</span>
               </div>
             </div>
 
-            {/* Operational Squad SLA & Readiness Status (4 cols) */}
-            <div className="lg:col-span-4 bg-white border border-[#E2E8F0] rounded-2xl p-6 shadow-xs space-y-4 flex flex-col justify-between">
+            {/* Operational Squad SLA & Readiness Status (6 cols) */}
+            <div className="lg:col-span-6 bg-white border border-[#E2E8F0] rounded-2xl p-6 shadow-xs space-y-4 flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
@@ -714,31 +773,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-lg text-xs font-semibold">
                 <button
                   onClick={() => setRoleFilter("ALL")}
-                  className={`px-2.5 py-1 rounded ${roleFilter === "ALL" ? "bg-white text-slate-900 shadow-xs" : "text-slate-600"}`}
+                  className={`px-2.5 py-1 rounded cursor-pointer ${roleFilter === "ALL" ? "bg-white text-slate-900 shadow-xs" : "text-slate-600 hover:text-slate-900"}`}
                 >
                   All
                 </button>
                 <button
                   onClick={() => setRoleFilter("citizen")}
-                  className={`px-2.5 py-1 rounded ${roleFilter === "citizen" ? "bg-white text-slate-900 shadow-xs" : "text-slate-600"}`}
+                  className={`px-2.5 py-1 rounded cursor-pointer ${roleFilter === "citizen" ? "bg-white text-slate-900 shadow-xs" : "text-slate-600 hover:text-slate-900"}`}
                 >
                   Citizens
                 </button>
                 <button
                   onClick={() => setRoleFilter("municipal")}
-                  className={`px-2.5 py-1 rounded ${roleFilter === "municipal" ? "bg-white text-slate-900 shadow-xs" : "text-slate-600"}`}
+                  className={`px-2.5 py-1 rounded cursor-pointer ${roleFilter === "municipal" ? "bg-white text-slate-900 shadow-xs" : "text-slate-600 hover:text-slate-900"}`}
                 >
                   Municipal
                 </button>
                 <button
                   onClick={() => setRoleFilter("field_team")}
-                  className={`px-2.5 py-1 rounded ${roleFilter === "field_team" ? "bg-white text-slate-900 shadow-xs" : "text-slate-600"}`}
+                  className={`px-2.5 py-1 rounded cursor-pointer ${roleFilter === "field_team" ? "bg-white text-slate-900 shadow-xs" : "text-slate-600 hover:text-slate-900"}`}
                 >
                   Field Team
                 </button>
                 <button
                   onClick={() => setRoleFilter("admin")}
-                  className={`px-2.5 py-1 rounded ${roleFilter === "admin" ? "bg-white text-slate-900 shadow-xs" : "text-slate-600"}`}
+                  className={`px-2.5 py-1 rounded cursor-pointer ${roleFilter === "admin" ? "bg-white text-slate-900 shadow-xs" : "text-slate-600 hover:text-slate-900"}`}
                 >
                   Admin
                 </button>
@@ -752,9 +811,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   placeholder="Search user or email..."
                   value={userSearch}
                   onChange={e => setUserSearch(e.target.value)}
-                  className="pl-8.5 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-hidden focus:border-blue-500 w-48 sm:w-56"
+                  className="pl-8.5 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-hidden focus:border-blue-500 w-44 sm:w-52"
                 />
               </div>
+
+              {/* Prominent + Add User Button */}
+              <button
+                onClick={() => {
+                  setCreateUserError(null);
+                  setShowAddUserModal(true);
+                }}
+                className="flex items-center gap-1.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white px-3.5 py-1.5 rounded-lg text-xs font-bold shadow-xs transition cursor-pointer"
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+                <span>+ Add User</span>
+              </button>
             </div>
           </div>
 
@@ -784,6 +855,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       <td className="py-3 px-4">
                         <div className="font-semibold text-slate-900">{u.fullName}</div>
                         <div className="text-[11px] text-slate-400 font-mono">{u.email}</div>
+                        {u.phone && <div className="text-[10px] text-slate-400">{u.phone}</div>}
                       </td>
                       <td className="py-3 px-4">
                         <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold ${
@@ -827,20 +899,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           </span>
                         )}
                       </td>
-                      <td className="py-3 px-4 text-right space-x-2">
+                      <td className="py-3 px-4 text-right space-x-1.5 whitespace-nowrap">
+                        <button
+                          onClick={() => setSelectedUserDetails(u)}
+                          className="px-2.5 py-1 text-[11px] font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded transition cursor-pointer"
+                          title="View user details"
+                        >
+                          Details
+                        </button>
                         <button
                           onClick={() => {
                             setEditingUser(u);
                             setNewRoleInput(u.role);
                             setNewDeptInput(u.department || "");
                           }}
-                          className="px-2.5 py-1 text-[11px] font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded transition"
+                          className="px-2.5 py-1 text-[11px] font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded transition cursor-pointer"
                         >
                           Edit Role
                         </button>
                         <button
                           onClick={() => handleToggleUser(u)}
-                          className={`px-2.5 py-1 text-[11px] font-semibold rounded transition ${
+                          className={`px-2.5 py-1 text-[11px] font-semibold rounded transition cursor-pointer ${
                             u.active !== false
                               ? "text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200"
                               : "text-emerald-600 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200"
@@ -983,146 +1062,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </div>
       )}
 
-      {/* TAB 4: SYSTEM HEALTH */}
-      {activeTab === "system" && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {/* Service 1: Firebase Auth */}
-            <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 font-bold text-slate-900 text-sm">
-                  <Lock className="w-4 h-4 text-blue-600" />
-                  <span>Firebase Authentication</span>
-                </div>
-                <span className="bg-emerald-50 text-emerald-700 font-bold text-[10px] px-2 py-0.5 rounded border border-emerald-200">
-                  HEALTHY
-                </span>
-              </div>
-              <p className="text-xs text-slate-500">
-                JWT token issuance, email verification, Google OAuth provider and session lifecycle.
-              </p>
-              <div className="text-[11px] font-mono text-slate-600 space-y-1 bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-                <div className="flex justify-between"><span>Provider:</span><span>Identity Platform</span></div>
-                <div className="flex justify-between"><span>Latency:</span><span>45ms</span></div>
-                <div className="flex justify-between"><span>Security:</span><span>Strict RBAC</span></div>
-              </div>
-            </div>
-
-            {/* Service 2: Cloud Firestore */}
-            <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 font-bold text-slate-900 text-sm">
-                  <Server className="w-4 h-4 text-purple-600" />
-                  <span>Cloud Firestore NoSQL</span>
-                </div>
-                <span className="bg-emerald-50 text-emerald-700 font-bold text-[10px] px-2 py-0.5 rounded border border-emerald-200">
-                  HEALTHY
-                </span>
-              </div>
-              <p className="text-xs text-slate-500">
-                Real-time snapshots, incident reports index, spatial documents, and immutable history log.
-              </p>
-              <div className="text-[11px] font-mono text-slate-600 space-y-1 bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-                <div className="flex justify-between"><span>Database:</span><span>Default (eur3)</span></div>
-                <div className="flex justify-between"><span>Write Avg:</span><span>110ms</span></div>
-                <div className="flex justify-between"><span>Listeners:</span><span>Active (Live Sync)</span></div>
-              </div>
-            </div>
-
-            {/* Service 3: Gemini Vision AI */}
-            <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 font-bold text-slate-900 text-sm">
-                  <Cpu className="w-4 h-4 text-emerald-600" />
-                  <span>Gemini 2.5 / 3.5 Engine</span>
-                </div>
-                <span className="bg-emerald-50 text-emerald-700 font-bold text-[10px] px-2 py-0.5 rounded border border-emerald-200">
-                  HEALTHY
-                </span>
-              </div>
-              <p className="text-xs text-slate-500">
-                Hazard detection, spatial deduplication (<span className="font-mono">r &lt; 5m</span>), and repair severity scoring.
-              </p>
-              <div className="text-[11px] font-mono text-slate-600 space-y-1 bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-                <div className="flex justify-between"><span>Model:</span><span>gemini-2.5-flash</span></div>
-                <div className="flex justify-between"><span>Inference:</span><span>640ms</span></div>
-                <div className="flex justify-between"><span>Status:</span><span>Operational</span></div>
-              </div>
-            </div>
-          </div>
-
-          {/* System Rate Limits & SLA Config */}
-          <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-4">
-            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-              <Clock className="w-4 h-4 text-blue-600" />
-              <span>SLA Target Parameters by Priority Tier</span>
-            </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
-              <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg">
-                <span className="font-bold text-rose-800">Critical Priority</span>
-                <p className="text-xl font-extrabold text-rose-900 mt-1">4 Hours</p>
-                <p className="text-[11px] text-rose-700 mt-0.5">Highways, main arteries, sinkholes</p>
-              </div>
-              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                <span className="font-bold text-amber-800">High Priority</span>
-                <p className="text-xl font-extrabold text-amber-900 mt-1">12 Hours</p>
-                <p className="text-[11px] text-amber-700 mt-0.5">Traffic corridor obstacles, deep potholes</p>
-              </div>
-              <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                <span className="font-bold text-blue-800">Medium Priority</span>
-                <p className="text-xl font-extrabold text-blue-900 mt-1">24 Hours</p>
-                <p className="text-[11px] text-blue-700 mt-0.5">Secondary street surfaces, streetlights</p>
-              </div>
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
-                <span className="font-bold text-slate-800">Low Priority</span>
-                <p className="text-xl font-extrabold text-slate-900 mt-1">48 Hours</p>
-                <p className="text-[11px] text-slate-700 mt-0.5">Surface cracks, cosmetic graffiti</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* TAB 5: AUDIT TRAIL */}
-      {activeTab === "audit" && (
-        <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
-          <div className="p-5 border-b border-slate-200 flex items-center justify-between">
-            <div>
-              <h2 className="text-base font-bold text-slate-900">Platform Security & Governance Ledger</h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Audited timeline of administrative decisions, role modifications, and system triggers.
-              </p>
-            </div>
-            <span className="text-[11px] font-mono bg-slate-100 text-slate-600 px-2 py-1 rounded border border-slate-200">
-              IMMUTABLE FIRESTORE AUDIT
-            </span>
-          </div>
-
-          <div className="divide-y divide-slate-100 max-h-[500px] overflow-y-auto">
-            {auditLogs.map(log => (
-              <div key={log.id} className="p-4 hover:bg-slate-50/75 transition flex items-start gap-3">
-                <div className="w-2 h-2 rounded-full bg-blue-500 mt-1.5 shrink-0" />
-                <div className="space-y-1 flex-1">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-900 font-mono">{log.action}</span>
-                    <span className="text-[10px] text-slate-400">
-                      {new Date(log.timestamp).toLocaleString()}
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-600">{log.details}</p>
-                  <div className="flex items-center gap-2 text-[10px] text-slate-400">
-                    <span>Actor: <strong className="text-slate-700">{log.actorEmail}</strong></span>
-                    <span>•</span>
-                    <span className="uppercase font-mono font-bold text-blue-600">{log.actorRole}</span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* TAB 6: SETTINGS */}
+      {/* TAB 4: SETTINGS */}
       {activeTab === "settings" && (
         <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-6">
           <div>
@@ -1382,6 +1322,379 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 className="px-4 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition"
               >
                 Save Squad Config
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: ADD NEW USER */}
+      {showAddUserModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-2xl max-w-lg w-full space-y-4 my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-start justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+                  <UserPlus className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 font-sans">Add New User</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Provision verified access with role-based security clearances.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAddUserModal(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {createUserError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600" />
+                <span>{createUserError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleCreateUser} className="space-y-3.5 text-xs">
+              {/* Full Name */}
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Full Name *</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Officer Vikram Malhotra"
+                  value={newUserName}
+                  onChange={e => setNewUserName(e.target.value)}
+                  required
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-hidden focus:border-blue-500"
+                />
+              </div>
+
+              {/* Email Address */}
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Email Address *</label>
+                <input
+                  type="email"
+                  placeholder="e.g. vikram.malhotra@urbanpulse.gov"
+                  value={newUserEmail}
+                  onChange={e => setNewUserEmail(e.target.value)}
+                  required
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-hidden focus:border-blue-500"
+                />
+              </div>
+
+              {/* Password & Phone Number Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Password *</label>
+                  <div className="relative">
+                    <input
+                      type={showNewUserPassword ? "text" : "password"}
+                      placeholder="Min. 6 characters"
+                      value={newUserPassword}
+                      onChange={e => setNewUserPassword(e.target.value)}
+                      required
+                      minLength={6}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 pr-9 text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-hidden focus:border-blue-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewUserPassword(!showNewUserPassword)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                    >
+                      {showNewUserPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Phone Number (Optional)</label>
+                  <input
+                    type="tel"
+                    placeholder="+91 98110 00000"
+                    value={newUserPhone}
+                    onChange={e => setNewUserPhone(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-hidden focus:border-blue-500"
+                  />
+                </div>
+              </div>
+
+              {/* Role Selection & Account Status */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">System Role *</label>
+                  <select
+                    value={newUserRole}
+                    onChange={e => {
+                      const r = e.target.value as UserRole;
+                      setNewUserRole(r);
+                      if (r === "citizen") setNewUserDepartment("Civilian Public");
+                      else if (r === "municipal") setNewUserDepartment("Public Works & Urban Roads (PWD)");
+                      else if (r === "admin") setNewUserDepartment("Municipal Digital Governance Board");
+                      else if (r === "field_team" && teams.length > 0) {
+                        setNewUserTeamId(teams[0].id);
+                        setNewUserDepartment(teams[0].department);
+                      }
+                    }}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-900 font-semibold focus:bg-white focus:outline-hidden focus:border-blue-500"
+                  >
+                    <option value="citizen">CITIZEN</option>
+                    <option value="municipal">MUNICIPAL</option>
+                    <option value="field_team">FIELD TEAM</option>
+                    <option value="admin">ADMIN</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Account Status</label>
+                  <select
+                    value={newUserActive ? "true" : "false"}
+                    onChange={e => setNewUserActive(e.target.value === "true")}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-900 focus:bg-white focus:outline-hidden focus:border-blue-500"
+                  >
+                    <option value="true">Active</option>
+                    <option value="false">Inactive</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Role-Specific Affiliation Fields */}
+              {newUserRole === "citizen" && (
+                <div className="p-3 bg-blue-50/60 border border-blue-100 rounded-xl text-[11.5px] text-blue-900 flex items-center gap-2">
+                  <Shield className="w-4 h-4 text-blue-600 shrink-0" />
+                  <span>Affiliation: <strong>Civilian Public</strong> (Civic points & real-time reporting enabled automatically).</span>
+                </div>
+              )}
+
+              {newUserRole === "municipal" && (
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Municipal Department / Directorate *</label>
+                  <select
+                    value={newUserDepartment}
+                    onChange={e => setNewUserDepartment(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-900 focus:bg-white focus:outline-hidden focus:border-blue-500"
+                  >
+                    <option value="Public Works & Urban Roads (PWD)">Public Works & Urban Roads (PWD)</option>
+                    <option value="Power Grid & Streetlights Division">Power Grid & Streetlights Division</option>
+                    <option value="Solid Waste & Sanitation Department">Solid Waste & Sanitation Department</option>
+                    <option value="Traffic & Emergency Obstruction Fleet">Traffic & Emergency Obstruction Fleet</option>
+                    <option value="Water Supply & Urban Drainage Authority">Water Supply & Urban Drainage Authority</option>
+                    <option value="Disaster Management & Emergency Directorate">Disaster Management & Emergency Directorate</option>
+                  </select>
+                </div>
+              )}
+
+              {newUserRole === "field_team" && (
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Assigned Field Squad / Unit *</label>
+                  {teams.length > 0 ? (
+                    <select
+                      value={newUserTeamId}
+                      onChange={e => {
+                        const tId = e.target.value;
+                        setNewUserTeamId(tId);
+                        const matched = teams.find(t => t.id === tId);
+                        if (matched) setNewUserDepartment(matched.department);
+                      }}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-900 focus:bg-white focus:outline-hidden focus:border-blue-500"
+                    >
+                      {teams.map(t => (
+                        <option key={t.id} value={t.id}>
+                          {t.name} ({t.district}) - Lead: {t.lead}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      placeholder="e.g. Road Maintenance Team Alpha (RT-014)"
+                      value={newUserDepartment}
+                      onChange={e => setNewUserDepartment(e.target.value)}
+                      required
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-900 focus:bg-white focus:outline-hidden focus:border-blue-500"
+                    />
+                  )}
+                </div>
+              )}
+
+              {newUserRole === "admin" && (
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Administrative Board / Directorate *</label>
+                  <select
+                    value={newUserDepartment}
+                    onChange={e => setNewUserDepartment(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-900 focus:bg-white focus:outline-hidden focus:border-blue-500"
+                  >
+                    <option value="Municipal Digital Governance Board">Municipal Digital Governance Board</option>
+                    <option value="City IT & Cyber Infrastructure">City IT & Cyber Infrastructure</option>
+                    <option value="Urban Administration Command">Urban Administration Command</option>
+                    <option value="Executive Municipal Commission">Executive Municipal Commission</option>
+                  </select>
+                </div>
+              )}
+
+              {/* Form Actions */}
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowAddUserModal(false)}
+                  disabled={creatingUser}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={creatingUser}
+                  className="px-5 py-2 text-xs font-bold bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-60 text-white rounded-lg transition flex items-center gap-1.5 shadow-xs cursor-pointer"
+                >
+                  {creatingUser ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Creating User...</span>
+                    </>
+                  ) : (
+                    <span>Create User</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: USER DETAILS */}
+      {selectedUserDetails && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-2xl max-w-md w-full space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-start justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className={`w-11 h-11 rounded-2xl flex items-center justify-center font-bold text-base shadow-xs ${
+                  selectedUserDetails.role === "admin"
+                    ? "bg-rose-100 text-rose-700"
+                    : selectedUserDetails.role === "municipal"
+                    ? "bg-purple-100 text-purple-700"
+                    : selectedUserDetails.role === "field_team"
+                    ? "bg-amber-100 text-amber-700"
+                    : "bg-blue-100 text-blue-700"
+                }`}>
+                  {selectedUserDetails.fullName.charAt(0).toUpperCase()}
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">{selectedUserDetails.fullName}</h3>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold ${
+                      selectedUserDetails.role === "admin"
+                        ? "bg-rose-50 text-rose-700 border border-rose-200"
+                        : selectedUserDetails.role === "municipal"
+                        ? "bg-purple-50 text-purple-700 border border-purple-200"
+                        : selectedUserDetails.role === "field_team"
+                        ? "bg-amber-50 text-amber-700 border border-amber-200"
+                        : "bg-blue-50 text-blue-700 border border-blue-200"
+                    }`}>
+                      {selectedUserDetails.role.toUpperCase().replace("_", " ")}
+                    </span>
+                    {selectedUserDetails.active !== false ? (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                        <span>Active</span>
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
+                        <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                        <span>Deactivated</span>
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedUserDetails(null)}
+                className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-2.5 text-xs text-slate-700">
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Email Address:</span>
+                  <span className="font-mono font-medium text-slate-900">{selectedUserDetails.email}</span>
+                </div>
+                {selectedUserDetails.phone && (
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Phone:</span>
+                    <span className="font-medium text-slate-900">{selectedUserDetails.phone}</span>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Department / Unit:</span>
+                  <span className="font-medium text-slate-900 text-right max-w-[200px] truncate">
+                    {selectedUserDetails.role === "field_team" && selectedUserDetails.teamName
+                      ? selectedUserDetails.teamName
+                      : selectedUserDetails.department || "Civilian Public"}
+                  </span>
+                </div>
+                {selectedUserDetails.teamLead && (
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Squad Lead:</span>
+                    <span className="font-medium text-slate-900">{selectedUserDetails.teamLead}</span>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Account Created:</span>
+                  <span className="font-mono text-slate-600">{new Date(selectedUserDetails.createdAt).toLocaleDateString()}</span>
+                </div>
+              </div>
+
+              {selectedUserDetails.role === "citizen" && (
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="p-2.5 bg-blue-50/60 rounded-xl border border-blue-100">
+                    <span className="text-[10px] text-blue-700 font-bold block">Points</span>
+                    <span className="text-base font-black text-blue-900">{selectedUserDetails.points || 0}</span>
+                  </div>
+                  <div className="p-2.5 bg-purple-50/60 rounded-xl border border-purple-100">
+                    <span className="text-[10px] text-purple-700 font-bold block">Scans</span>
+                    <span className="text-base font-black text-purple-900">{selectedUserDetails.scansCount || 0}</span>
+                  </div>
+                  <div className="p-2.5 bg-emerald-50/60 rounded-xl border border-emerald-100">
+                    <span className="text-[10px] text-emerald-700 font-bold block">Reports</span>
+                    <span className="text-base font-black text-emerald-900">{selectedUserDetails.reportsCount || 0}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                onClick={() => {
+                  const target = selectedUserDetails;
+                  setSelectedUserDetails(null);
+                  setEditingUser(target);
+                  setNewRoleInput(target.role);
+                  setNewDeptInput(target.department || "");
+                }}
+                className="px-3.5 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition cursor-pointer"
+              >
+                Edit Role
+              </button>
+              <button
+                onClick={() => {
+                  const target = selectedUserDetails;
+                  handleToggleUser(target);
+                  setSelectedUserDetails({ ...target, active: !target.active });
+                }}
+                className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer ${
+                  selectedUserDetails.active !== false
+                    ? "text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200"
+                    : "text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200"
+                }`}
+              >
+                {selectedUserDetails.active !== false ? "Deactivate Account" : "Activate Account"}
               </button>
             </div>
           </div>

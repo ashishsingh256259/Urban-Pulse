@@ -81,26 +81,22 @@ export function subscribeToNotifications(
     // Sort by createdAt descending
     notifList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
-    if (notifList.length > 0) {
-      try {
-        localStorage.setItem(`urbanpulse_cached_notifs_${userRole}_${normalizedEmail}`, JSON.stringify(notifList));
-      } catch (e) {}
-    }
-
     callback(notifList);
-  }, (error) => {
+  }, async (error) => {
+    handleFirestoreError(error, OperationType.LIST, "notifications");
+
+    // Resilient Fallback: Fetch notifications from REST API if Firestore quota/network error occurs
     try {
-      const cached = localStorage.getItem(`urbanpulse_cached_notifs_${userRole}_${normalizedEmail}`);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          callback(parsed);
-          return;
+      const resp = await fetch(`/api/notifications?email=${encodeURIComponent(userEmail)}&role=${encodeURIComponent(userRole)}`);
+      if (resp.ok) {
+        const data = await resp.json();
+        if (Array.isArray(data.notifications)) {
+          callback(data.notifications);
         }
       }
-    } catch (e) {}
-
-    handleFirestoreError(error, OperationType.LIST, "notifications");
+    } catch (apiErr) {
+      console.warn("[Notifications] API fallback notice:", apiErr);
+    }
   });
 
   return unsubscribe;

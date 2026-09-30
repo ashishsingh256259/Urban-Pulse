@@ -58,7 +58,7 @@ export interface FirestoreErrorInfo {
 /**
  * Standardized error handler adhering strictly to the Firebase Integration Skill.
  */
-export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): never {
+export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): void {
   const currentAuthUser = auth.currentUser;
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
@@ -77,7 +77,6 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     path,
   };
   console.error("Firestore Error: ", JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
 }
 
 /**

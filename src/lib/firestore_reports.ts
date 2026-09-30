@@ -16,7 +16,10 @@ const isMunicipalUser = (userContext?: UserAuthContext | null): boolean => {
   return role === "admin" || role === "municipal";
 };
 
-export const subscribeToReports = (callback: (reports: Report[]) => void) => {
+export const subscribeToReports = (
+  callback: (reports: Report[]) => void,
+  onQuotaError?: (err: any) => void
+) => {
   const q = query(collection(db, "reports"), orderBy("createdAt", "desc"));
   return onSnapshot(q, (snapshot) => {
     const reports: Report[] = [];
@@ -36,88 +39,60 @@ export const subscribeToReports = (callback: (reports: Report[]) => void) => {
         } as Report);
       }
     });
-
-    if (reports.length > 0) {
-      try {
-        localStorage.setItem("urbanpulse_cached_reports", JSON.stringify(reports));
-      } catch (e) {}
-    }
-
     callback(reports);
-  }, (error) => {
+  }, async (error) => {
+    handleFirestoreError(error, OperationType.LIST, "reports");
+    if (onQuotaError) onQuotaError(error);
+
+    // Fallback: load reports from server REST API if client Firestore quota/network fails
     try {
-      const cached = localStorage.getItem("urbanpulse_cached_reports");
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          callback(parsed);
-          return;
+      const resp = await fetch("/api/reports");
+      if (resp.ok) {
+        const data = await resp.json();
+        if (Array.isArray(data.reports) && data.reports.length > 0) {
+          callback(data.reports);
         }
       }
-    } catch (e) {}
-
-    handleFirestoreError(error, OperationType.LIST, "reports");
+    } catch (apiErr) {
+      console.warn("[Reports] API fallback notice:", apiErr);
+    }
   });
 };
 
 export const createReport = async (report: Omit<Report, "id">) => {
-  const newId = `REP-${Date.now().toString(36).toUpperCase()}`;
-  const nowStr = new Date().toISOString();
+  const reportsRef = collection(db, "reports");
+  const docRef = await addDoc(reportsRef, {
+    ...report,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
   
+  // Real-time notification for Municipal Panel
   try {
-    const reportsRef = collection(db, "reports");
-    const docRef = await addDoc(reportsRef, {
-      ...report,
-      createdAt: nowStr,
-      updatedAt: nowStr,
-    });
-    
-    // Real-time notification for Municipal Panel
-    try {
+    await createNotification(
+      `New ${report.source === 'ROAD_SCANNER' ? 'AI' : 'Citizen'} Report: ${report.title}`,
+      `A new incident has been logged in ${report.location || 'your jurisdiction'}.`,
+      "report_submitted",
+      "municipal",
+      "",
+      docRef.id
+    );
+
+    if (report.reporterEmail) {
       await createNotification(
-        `New ${report.source === 'ROAD_SCANNER' ? 'AI' : 'Citizen'} Report: ${report.title}`,
-        `A new incident has been logged in ${report.location || 'your jurisdiction'}.`,
+        `Report Submitted: ${report.title}`,
+        `Your report ticket "${report.title}" has been logged with Municipal Command.`,
         "report_submitted",
-        "municipal",
-        "",
+        "citizen",
+        report.reporterEmail,
         docRef.id
       );
-
-      if (report.reporterEmail) {
-        await createNotification(
-          `Report Submitted: ${report.title}`,
-          `Your report ticket "${report.title}" has been logged with Municipal Command.`,
-          "report_submitted",
-          "citizen",
-          report.reporterEmail,
-          docRef.id
-        );
-      }
-    } catch (e) {
-      handleFirestoreError(e, OperationType.CREATE, "notifications");
     }
-    
-    return docRef.id;
-  } catch (err) {
-    handleFirestoreError(err, OperationType.CREATE, "reports");
-    
-    // Fallback local report creation
-    const fallbackReport: Report = {
-      id: newId,
-      ...report,
-      createdAt: nowStr,
-      updatedAt: nowStr,
-    } as Report;
-
-    try {
-      const cachedStr = localStorage.getItem("urbanpulse_cached_reports");
-      const existing: Report[] = cachedStr ? JSON.parse(cachedStr) : [];
-      existing.unshift(fallbackReport);
-      localStorage.setItem("urbanpulse_cached_reports", JSON.stringify(existing));
-    } catch (e) {}
-
-    return newId;
+  } catch (e) {
+    handleFirestoreError(e, OperationType.CREATE, "notifications");
   }
+  
+  return docRef.id;
 };
 
 export const updateReportStatus = async (
@@ -130,46 +105,33 @@ export const updateReportStatus = async (
     throw new Error("Unauthorized: Only authenticated Municipal officers can perform status updates.");
   }
 
+  const docRef = doc(db, "reports", id);
+  
+  // Fetch existing report to know who to notify
+  const snap = await getDoc(docRef);
   const nowStr = new Date().toISOString();
-
-  try {
-    const docRef = doc(db, "reports", id);
-    const snap = await getDoc(docRef);
-    
-    await updateDoc(docRef, {
-      status,
-      updatedAt: nowStr,
-    });
-    
-    if (snap.exists()) {
-      const data = snap.data();
-      if (data.reporterEmail) {
-        try {
-          await createNotification(
-            `Report Status Updated to ${status}`,
-            comment || `Your report "${data.title}" has been updated by the Municipal Command Center.`,
-            "status_update",
-            "citizen",
-            data.reporterEmail,
-            id
-          );
-        } catch (e) {
-          handleFirestoreError(e, OperationType.CREATE, "notifications");
-        }
+  
+  await updateDoc(docRef, {
+    status,
+    updatedAt: nowStr,
+  });
+  
+  if (snap.exists()) {
+    const data = snap.data();
+    if (data.reporterEmail) {
+      try {
+        await createNotification(
+          `Report Status Updated to ${status}`,
+          comment || `Your report "${data.title}" has been updated by the Municipal Command Center.`,
+          "status_update",
+          "citizen",
+          data.reporterEmail,
+          id
+        );
+      } catch (e) {
+        handleFirestoreError(e, OperationType.CREATE, "notifications");
       }
     }
-  } catch (err) {
-    handleFirestoreError(err, OperationType.UPDATE, "reports");
-    
-    // Fallback local update
-    try {
-      const cachedStr = localStorage.getItem("urbanpulse_cached_reports");
-      if (cachedStr) {
-        const existing: Report[] = JSON.parse(cachedStr);
-        const updated = existing.map(r => r.id === id ? { ...r, status, updatedAt: nowStr } : r);
-        localStorage.setItem("urbanpulse_cached_reports", JSON.stringify(updated));
-      }
-    } catch (e) {}
   }
 };
 

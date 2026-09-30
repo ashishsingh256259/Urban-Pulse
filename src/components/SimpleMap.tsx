@@ -38,6 +38,28 @@ export default function SimpleMap({
   const [clusteringEnabled, setClusteringEnabled] = useState(true);
   const [sourceFilter, setSourceFilter] = useState<string>("All");
   const [statusFilter, setStatusFilter] = useState<string>("All");
+  const [selectedWard, setSelectedWard] = useState<string>("ALL");
+
+  // Function to smoothly zoom to specific city ward to demonstrate cluster expansion/contraction
+  const handleWardZoom = (wardKey: string) => {
+    setSelectedWard(wardKey);
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    const wardCoords: Record<string, { lat: number; lng: number; zoom: number }> = {
+      ALL: { lat: 28.6139, lng: 77.2090, zoom: 12 },
+      WARD_14: { lat: 28.6280, lng: 77.3649, zoom: 16 }, // Sector 62
+      WARD_02: { lat: 28.6315, lng: 77.2167, zoom: 16 }, // Connaught Place
+      WARD_08: { lat: 28.5921, lng: 77.0460, zoom: 16 }, // Cyber City / Dwarka
+      WARD_21: { lat: 28.6506, lng: 77.2303, zoom: 16 }  // Chandni Chowk
+    };
+
+    const target = wardCoords[wardKey] || wardCoords.ALL;
+    map.flyTo([target.lat, target.lng], target.zoom, {
+      animate: true,
+      duration: 1.2
+    });
+  };
 
   // Normalized valid points
   const validMapPoints = useMemo(() => getValidMapPoints(reports, {
@@ -235,10 +257,14 @@ export default function SimpleMap({
       // Create cluster group if clustering is enabled
       const clusterGroup = (clusteringEnabled && typeof (L as any).markerClusterGroup === "function")
         ? (L as any).markerClusterGroup({
-            showCoverageOnHover: false,
+            showCoverageOnHover: true,
             zoomToBoundsOnClick: true,
             spiderfyOnMaxZoom: true,
             removeOutsideVisibleBounds: true,
+            animate: true,
+            animateAddingMarkers: true,
+            spiderfyDistanceMultiplier: 1.4,
+            chunkedLoading: true,
             maxClusterRadius: 45,
             iconCreateFunction: (cluster: any) => {
               const count = cluster.getChildCount();
@@ -259,9 +285,9 @@ export default function SimpleMap({
 
               return L.divIcon({
                 html: `
-                  <div class="relative flex items-center justify-center w-11 h-11 -translate-x-1.5 -translate-y-1.5 cursor-pointer group" title="${count} clustered incidents (Max severity: ${maxSeverity}%)">
-                    <div class="absolute inset-0 rounded-full ${pingClass} opacity-30" style="background-color: ${primaryColor};"></div>
-                    <div class="w-10 h-10 rounded-full border-2 bg-white/95 shadow-md flex flex-col items-center justify-center font-mono transition-transform group-hover:scale-110" style="border-color: ${primaryColor};">
+                  <div class="relative flex items-center justify-center w-11 h-11 -translate-x-1.5 -translate-y-1.5 cursor-pointer group" title="${count} clustered incidents (Click to smoothly expand ward clusters)">
+                    <div class="absolute inset-0 rounded-full ${pingClass} opacity-30 transition-transform duration-300" style="background-color: ${primaryColor};"></div>
+                    <div class="w-10 h-10 rounded-full border-2 bg-white/95 shadow-md flex flex-col items-center justify-center font-mono transition-transform duration-300 group-hover:scale-115" style="border-color: ${primaryColor};">
                       <div class="text-[12px] font-black leading-none" style="color: ${primaryColor};">${count}</div>
                       <div class="text-[7.5px] uppercase font-sans font-extrabold tracking-tighter text-slate-500 leading-none mt-0.5">
                         ${hasRoadScan ? "📷 scan" : "incidents"}
@@ -485,6 +511,25 @@ export default function SimpleMap({
             <option value="Pending">Pending Only</option>
             <option value="In Progress">In Progress</option>
             <option value="Resolved">Resolved</option>
+          </select>
+        </div>
+
+        {/* Ward Quick Zoom Selector (Animates cluster expansion/contraction) */}
+        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-2.5 py-1 rounded-lg shadow-md flex items-center gap-1.5 text-[10.5px] font-bold">
+          <MapPin className="w-3.5 h-3.5 text-blue-200 shrink-0" />
+          <span className="hidden sm:inline text-blue-100 font-mono text-[9.5px]">WARD ZOOM:</span>
+          <select
+            id="map-ward-zoom-select"
+            value={selectedWard}
+            onChange={(e) => handleWardZoom(e.target.value)}
+            className="bg-transparent text-[10.5px] font-extrabold text-white focus:outline-hidden cursor-pointer font-sans"
+            title="Zoom into city ward to smoothly animate cluster expansion & contraction"
+          >
+            <option value="ALL" className="text-slate-900 font-normal">🔍 All City Wards (Overview)</option>
+            <option value="WARD_14" className="text-slate-900 font-normal">🏢 Ward 14 (Sector 62)</option>
+            <option value="WARD_02" className="text-slate-900 font-normal">🏛️ Ward 02 (Connaught Place)</option>
+            <option value="WARD_08" className="text-slate-900 font-normal">🚀 Ward 08 (Cyber City)</option>
+            <option value="WARD_21" className="text-slate-900 font-normal">🏙️ Ward 21 (Chandni Chowk)</option>
           </select>
         </div>
 

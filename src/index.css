@@ -37,14 +37,38 @@ body {
   border: 1px solid #e2e8f0;
 }
 
-/* Leaflet MarkerCluster Custom Styles */
+/* Leaflet MarkerCluster Custom Styles & Smooth Zoom Expansion/Contraction Animations */
 .custom-cluster-marker {
   background: transparent !important;
   border: none !important;
+  transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.25s ease-out;
+  will-change: transform, opacity;
 }
 
 .custom-cluster-marker div {
   user-select: none;
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease;
+}
+
+.custom-cluster-marker:hover div {
+  transform: scale(1.15);
+}
+
+/* Marker cluster expand/contract animation transitions */
+.leaflet-cluster-anim .leaflet-marker-icon,
+.leaflet-cluster-anim .leaflet-marker-shadow {
+  -webkit-transition: -webkit-transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.3s ease-in-out;
+  -moz-transition: -moz-transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.3s ease-in-out;
+  -o-transition: -o-transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.3s ease-in-out;
+  transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.3s ease-in-out;
+}
+
+/* Spiderfy leg animation on max zoom */
+.leaflet-cluster-spider-leg {
+  -webkit-transition: -webkit-stroke-dashoffset 0.35s ease-out, stroke 0.3s ease;
+  -moz-transition: -moz-stroke-dashoffset 0.35s ease-out, stroke 0.3s ease;
+  -o-transition: -o-stroke-dashoffset 0.35s ease-out, stroke 0.3s ease;
+  transition: stroke-dashoffset 0.35s ease-out, stroke 0.3s ease;
 }
 
 /* Hide standard leaflet attribution for cleaner dashboard look */

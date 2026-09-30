@@ -15,18 +15,33 @@ interface CityCommandCenterProps {
   onSelectReport: (report: Report) => void;
   onSelectSubTab: (tab: string) => void;
   userRole?: UserRole;
+  onSelectKpiFilter?: (filter: "critical" | "high" | "under-review" | "in-progress" | "resolved" | null) => void;
 }
 
 export default function CityCommandCenter({ 
   reports, 
   onSelectReport,
   onSelectSubTab,
-  userRole = "municipal"
+  userRole = "municipal",
+  onSelectKpiFilter
 }: CityCommandCenterProps) {
   const { t, isHindi } = useLanguage();
 
   const [expandedReasoning, setExpandedReasoning] = useState(false);
   const [feedFilter, setFeedFilter] = useState<"all" | "critical" | "corroborated" | "dispatched">("all");
+
+  const handleKpiClick = (filter: "critical" | "high" | "under-review" | "in-progress" | "resolved") => {
+    if (onSelectKpiFilter) {
+      onSelectKpiFilter(filter);
+    }
+    if (filter === "critical" || filter === "high") {
+      onSelectSubTab("incident-intelligence");
+    } else if (filter === "under-review" || filter === "in-progress") {
+      onSelectSubTab("dispatch-management");
+    } else if (filter === "resolved") {
+      onSelectSubTab("field-verification");
+    }
+  };
 
   // Real data metrics
   const activeReports = reports.filter(r => r.status !== "Resolved");
@@ -156,8 +171,15 @@ export default function CityCommandCenter({
       </div>
 
       {/* CITY STATUS METRIC RIBBON */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
-        <div className="bg-white border border-[#FECACA] rounded-2xl p-4 shadow-3xs hover:border-[#DC2626] transition-all">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5 animate-in fade-in duration-300">
+        <div 
+          onClick={() => handleKpiClick("critical")}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleKpiClick("critical"); } }}
+          role="button"
+          tabIndex={0}
+          aria-label={`Critical Active: ${criticalActive.length} items`}
+          className="bg-white border border-[#FECACA] rounded-2xl p-4 shadow-3xs hover:border-[#DC2626] hover:shadow-xs active:scale-[0.98] transition-all duration-150 cursor-pointer text-left"
+        >
           <div className="flex items-center justify-between">
             <span className="text-[9.5px] font-mono font-bold uppercase text-[#DC2626]">Critical Active</span>
             <span className="w-2 h-2 rounded-full bg-[#DC2626] animate-ping" />
@@ -166,25 +188,53 @@ export default function CityCommandCenter({
           <span className="text-[10px] text-[#64748B]">Immediate triage required</span>
         </div>
 
-        <div className="bg-white border border-[#FDE68A] rounded-2xl p-4 shadow-3xs hover:border-[#D97706] transition-all">
+        <div 
+          onClick={() => handleKpiClick("high")}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleKpiClick("high"); } }}
+          role="button"
+          tabIndex={0}
+          aria-label={`High Priority: ${highPriority.length} items`}
+          className="bg-white border border-[#FDE68A] rounded-2xl p-4 shadow-3xs hover:border-[#D97706] hover:shadow-xs active:scale-[0.98] transition-all duration-150 cursor-pointer text-left"
+        >
           <span className="text-[9.5px] font-mono font-bold uppercase text-[#D97706] block">High Priority</span>
           <span className="text-2xl font-black text-[#D97706] block mt-1.5">{highPriority.length}</span>
           <span className="text-[10px] text-[#64748B]">Active risk elevated</span>
         </div>
 
-        <div className="bg-white border border-[#E2E8F0] rounded-2xl p-4 shadow-3xs hover:border-[#2563EB] transition-all">
+        <div 
+          onClick={() => handleKpiClick("under-review")}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleKpiClick("under-review"); } }}
+          role="button"
+          tabIndex={0}
+          aria-label={`Under Review: ${underReview.length} items`}
+          className="bg-white border border-[#E2E8F0] rounded-2xl p-4 shadow-3xs hover:border-[#2563EB] hover:shadow-xs active:scale-[0.98] transition-all duration-150 cursor-pointer text-left"
+        >
           <span className="text-[9.5px] font-mono font-bold uppercase text-[#64748B] block">Under Review</span>
           <span className="text-2xl font-black text-[#172033] block mt-1.5">{underReview.length}</span>
           <span className="text-[10px] text-[#64748B]">Awaiting squad triage</span>
         </div>
 
-        <div className="bg-white border border-[#DBEAFE] rounded-2xl p-4 shadow-3xs hover:border-[#2563EB] transition-all">
+        <div 
+          onClick={() => handleKpiClick("in-progress")}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleKpiClick("in-progress"); } }}
+          role="button"
+          tabIndex={0}
+          aria-label={`In Progress: ${inProgress.length} items`}
+          className="bg-white border border-[#DBEAFE] rounded-2xl p-4 shadow-3xs hover:border-[#2563EB] hover:shadow-xs active:scale-[0.98] transition-all duration-150 cursor-pointer text-left"
+        >
           <span className="text-[9.5px] font-mono font-bold uppercase text-[#2563EB] block">In Progress</span>
           <span className="text-2xl font-black text-[#2563EB] block mt-1.5">{inProgress.length}</span>
           <span className="text-[10px] text-[#64748B]">Squads dispatched</span>
         </div>
 
-        <div className="bg-white border border-[#BBF7D0] rounded-2xl p-4 shadow-3xs hover:border-[#16A34A] transition-all col-span-2 sm:col-span-1">
+        <div 
+          onClick={() => handleKpiClick("resolved")}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleKpiClick("resolved"); } }}
+          role="button"
+          tabIndex={0}
+          aria-label={`Resolved and QA: ${resolved.length} items`}
+          className="bg-white border border-[#BBF7D0] rounded-2xl p-4 shadow-3xs hover:border-[#16A34A] hover:shadow-xs active:scale-[0.98] transition-all duration-150 cursor-pointer text-left col-span-2 sm:col-span-1"
+        >
           <span className="text-[9.5px] font-mono font-bold uppercase text-[#16A34A] block">Resolved & QA</span>
           <span className="text-2xl font-black text-[#16A34A] block mt-1.5">{resolved.length}</span>
           <span className="text-[10px] text-[#64748B]">Closed loop verified</span>

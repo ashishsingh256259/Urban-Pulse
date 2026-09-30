@@ -167,6 +167,40 @@ export default function App() {
     "citizen-home" | "my-reports" | "municipal-home" | "command-center" | "citizen-signals" | "incident-intelligence" | "field-verification" | "infrastructure" | "dispatch-management" | "road-scanner" | "candidate-review" | "safe-route" | "rewards" | "emergency-sos" | "copilot" | "analytics" | "digital-twin" | "safety" | "traffic" | "environmental" | "emergency" | "field-operations" | "admin-panel" | "admin-users" | "admin-teams" | "admin-settings"
   >("citizen-home");
 
+  const [muniKpiFilter, setMuniKpiFilter] = useState<
+    "critical" | "high" | "under-review" | "in-progress" | "resolved" | null
+  >(null);
+
+  const reportsForIncidentIntelligence = useMemo(() => {
+    if (!muniKpiFilter) return reports;
+    if (muniKpiFilter === "critical") {
+      return reports.filter(r => (r.priority === "Critical" || r.severity >= 75) && r.status !== "Resolved");
+    }
+    if (muniKpiFilter === "high") {
+      return reports.filter(r => (r.priority === "High" || (r.severity >= 50 && r.severity < 75)) && r.status !== "Resolved");
+    }
+    return reports;
+  }, [reports, muniKpiFilter]);
+
+  const reportsForDispatchResponse = useMemo(() => {
+    if (!muniKpiFilter) return reports;
+    if (muniKpiFilter === "under-review") {
+      return reports.filter(r => r.status === "Pending");
+    }
+    if (muniKpiFilter === "in-progress") {
+      return reports.filter(r => r.status === "In Progress" || r.status === "Assigned");
+    }
+    return reports;
+  }, [reports, muniKpiFilter]);
+
+  const reportsForFieldVerification = useMemo(() => {
+    if (!muniKpiFilter) return reports;
+    if (muniKpiFilter === "resolved") {
+      return reports.filter(r => r.status === "Resolved");
+    }
+    return reports;
+  }, [reports, muniKpiFilter]);
+
   // On mount and role change, reset to correct home
   useEffect(() => {
     if (currentUser?.role === "field_team") {
@@ -736,6 +770,7 @@ export default function App() {
                 <button
                   key={item.id}
                   onClick={() => {
+                    setMuniKpiFilter(null);
                     setActiveSubTab(item.id as any);
                     setIsSidebarMobileOpen(false);
                   }}
@@ -1302,6 +1337,35 @@ export default function App() {
               />
             )}
 
+            {muniKpiFilter && (
+              <div className="bg-[#EFF6FF] border border-[#DBEAFE] rounded-2xl p-4 flex items-center justify-between shadow-2xs select-none animate-in fade-in duration-200">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-[#2563EB]/10 text-[#2563EB] flex items-center justify-center shrink-0">
+                    <Sparkles className="w-4 h-4 animate-pulse text-[#2563EB]" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-mono font-extrabold uppercase tracking-wider text-[#2563EB]">
+                      ACTIVE KPI FILTER APPLIED
+                    </div>
+                    <p className="text-xs font-bold text-[#172033] mt-0.5">
+                      Showing only{" "}
+                      <span className="text-[#2563EB] uppercase font-mono font-black">
+                        {muniKpiFilter.replace("-", " ")}
+                      </span>{" "}
+                      incidents across the active city dataset.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setMuniKpiFilter(null)}
+                  className="px-4 py-2 bg-white hover:bg-slate-50 text-[#172033] border border-[#E2E8F0] rounded-xl text-xs font-bold transition-all shadow-3xs cursor-pointer flex items-center gap-1.5"
+                >
+                  <X className="w-3.5 h-3.5 text-[#64748B]" />
+                  <span>Clear Filter</span>
+                </button>
+              </div>
+            )}
+
             {/* ROAD SCANNER DASHCAM & VISION ANALYSIS */}
             
             {activeSubTab === "citizen-home" && (
@@ -1321,6 +1385,7 @@ export default function App() {
                   onSelectSubTab={(tab) => {
                     setActiveSubTab(tab as any);
                   }}
+                  onSelectKpiFilter={setMuniKpiFilter}
                 />
               </RoleGuard>
             )}
@@ -1550,7 +1615,7 @@ export default function App() {
               >
                 <div className="w-full">
                   <DispatchResponseBoard
-                    reports={reports}
+                    reports={reportsForDispatchResponse}
                     currentUserName={currentUser.fullName}
                     currentUserEmail={currentUser.email}
                     onSelectReport={(rep) => setSelectedReport(rep)}
@@ -1615,6 +1680,7 @@ export default function App() {
                     onSelectSubTab={(tab) => {
                       setActiveSubTab(tab as any);
                     }}
+                    onSelectKpiFilter={setMuniKpiFilter}
                   />
                 </div>
               </RoleGuard>
@@ -1641,7 +1707,7 @@ export default function App() {
               <RoleGuard allowedRoles={["municipal", "admin"]}>
                 <div className="w-full">
                   <IncidentIntelligence
-                    reports={reports}
+                    reports={reportsForIncidentIntelligence}
                     selectedReport={selectedReport}
                     onSelectReport={(rep) => setSelectedReport(rep)}
                     onRefreshReports={() => syncOperationalDatasets(currentUser.email, currentUser.role)}
@@ -1675,7 +1741,7 @@ export default function App() {
               <RoleGuard allowedRoles={["municipal", "admin"]}>
                 <div className="w-full">
                   <FieldVerificationCenter
-                    reports={reports}
+                    reports={reportsForFieldVerification}
                     onSelectReport={(rep) => setSelectedReport(rep)}
                     onRefreshReports={() => syncOperationalDatasets(currentUser.email, currentUser.role)}
                   />

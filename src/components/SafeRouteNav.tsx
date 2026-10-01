@@ -77,13 +77,20 @@ export default function SafeRouteNav({ reports }: SafeRouteNavProps) {
   const [originCoord, setOriginCoord] = useState<[number, number] | null>(null);
   const [destCoord, setDestCoord] = useState<[number, number] | null>(null);
 
-  const [travelMode, setTravelMode] = useState<"driving" | "cycling" | "foot">("driving");
+  const [selectedTravelMode, setSelectedTravelMode] = useState<"car" | "bike" | "walk">("car");
   const [calculating, setCalculating] = useState(false);
   
   const [computedRoutes, setComputedRoutes] = useState<SafeRouteOption[]>([]);
   const [selectedRouteId, setSelectedRouteId] = useState<string>("");
   
   const [statusMsg, setStatusMsg] = useState("IDLE");
+  const routeCache = useRef<Map<string, SafeRouteOption[]>>(new Map());
+
+  useEffect(() => {
+    if (originCoord && destCoord && originStr && destinationStr) {
+      handleCalculateRoute();
+    }
+  }, [selectedTravelMode]);
 
   // Initialize Map
   useEffect(() => {
@@ -141,12 +148,68 @@ export default function SafeRouteNav({ reports }: SafeRouteNavProps) {
     hazardMarkersRef.current = [];
   };
 
+  const drawAllReportsMarkers = (selectedRouteObj?: SafeRouteOption) => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    clearHazardMarkers();
+
+    const hazardIdsOnRoute = new Set((selectedRouteObj?.hazardsOnRoute || []).map((h: any) => h.id || `${h.lat},${h.lng}`));
+
+    reports.forEach(report => {
+      if (!report.latitude || !report.longitude) return;
+      if (report.status === "Resolved" || report.fieldStatus === "CLOSED") return;
+
+      const isSos = report.isSos || report.source === ("EMERGENCY_SOS" as any) || (report.title && report.title.toUpperCase().includes("SOS")) || (report.description && report.description.toUpperCase().includes("SOS"));
+      const isOnRoute = hazardIdsOnRoute.has(report.id) || hazardIdsOnRoute.has(`${report.latitude},${report.longitude}`);
+
+      let color = "#3B82F6";
+      if (isSos || report.priority === "Critical" || (report.severity || 0) >= 75) {
+        color = "#EF4444";
+      } else if (report.priority === "High" || (report.severity || 0) >= 45) {
+        color = "#F59E0B";
+      }
+
+      const size = isOnRoute ? 18 : 14;
+      const border = isOnRoute ? "3px solid #1D4ED8" : "2px solid white";
+      const shadow = isOnRoute ? "0 0 8px rgba(37,99,235,0.8)" : "0 0 4px rgba(0,0,0,0.5)";
+
+      const iconHtml = `<div style="background-color: ${color}; width: ${size}px; height: ${size}px; border-radius: 50%; border: ${border}; box-shadow: ${shadow};"></div>`;
+
+      const marker = L.marker([report.latitude, report.longitude], {
+        icon: L.divIcon({
+          className: "custom-div-icon",
+          html: iconHtml,
+          iconSize: [size, size],
+          iconAnchor: [size / 2, size / 2]
+        })
+      }).bindPopup(`
+        <div style="font-family: monospace; font-size: 11px; max-width: 200px;">
+          <strong>[${report.id}] ${report.title}</strong><br/>
+          Category: ${report.category}<br/>
+          Sev: ${report.severity} | Pri: ${report.priority || "Medium"}<br/>
+          Status: ${report.status || report.fieldStatus || "Active"}<br/>
+          Source: ${report.source || "MANUAL_REPORT"}
+          ${isOnRoute ? '<br/><span style="color: #2563EB; font-weight: bold;">(On Selected Route)</span>' : ''}
+        </div>
+      `).addTo(map);
+
+      hazardMarkersRef.current.push(marker);
+    });
+  };
+
+  useEffect(() => {
+    if (mapInstanceRef.current && reports.length > 0) {
+      if (computedRoutes.length === 0) {
+        drawAllReportsMarkers();
+      }
+    }
+  }, [reports, computedRoutes]);
+
   const drawRoutesAndHazards = (routes: SafeRouteOption[], selectedId: string) => {
     const map = mapInstanceRef.current;
     if (!map) return;
     
     clearMapRoutes();
-    clearHazardMarkers();
 
     const unselected = routes.filter(r => r.id !== selectedId);
     const selected = routes.find(r => r.id === selectedId);
@@ -166,30 +229,9 @@ export default function SafeRouteNav({ reports }: SafeRouteNavProps) {
 
     if (selected) {
       map.fitBounds(L.polyline(selected.pathCoordinates).getBounds(), { padding: [50, 50] });
-
-      // Draw hazards for selected route
-      selected.hazardsOnRoute.forEach((hz: any) => {
-        const color = hz.severity >= 75 ? "#EF4444" : hz.severity >= 45 ? "#F59E0B" : "#3B82F6";
-        const iconHtml = `<div style="background-color: ${color}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.5);"></div>`;
-        
-        const marker = L.marker([hz.lat, hz.lng], {
-          icon: L.divIcon({
-            className: "custom-div-icon",
-            html: iconHtml,
-            iconSize: [14, 14],
-            iconAnchor: [7, 7]
-          })
-        }).bindPopup(`
-          <div style="font-family: monospace; font-size: 11px;">
-            <strong>${hz.type}</strong><br/>
-            Sev: ${hz.severity} | Pri: ${hz.priority}<br/>
-            Status: ${hz.status}<br/>
-            Source: ${hz.source}
-          </div>
-        `).addTo(map);
-        hazardMarkersRef.current.push(marker);
-      });
     }
+
+    drawAllReportsMarkers(selected);
   };
 
   useEffect(() => {
@@ -282,6 +324,7 @@ export default function SafeRouteNav({ reports }: SafeRouteNavProps) {
     if (!originStr || !destinationStr) return;
     setCalculating(true);
     setStatusMsg("CALCULATING_ROUTE");
+    clearMapRoutes();
 
     let orig = originCoord;
     if (!orig || originStr !== "My Current Location") {
@@ -299,16 +342,34 @@ export default function SafeRouteNav({ reports }: SafeRouteNavProps) {
       return;
     }
 
+    const cacheKey = `${orig[0].toFixed(4)},${orig[1].toFixed(4)}-${dest[0].toFixed(4)},${dest[1].toFixed(4)}-${selectedTravelMode}`;
+    if (routeCache.current.has(cacheKey)) {
+      const cached = routeCache.current.get(cacheKey)!;
+      setComputedRoutes(cached);
+      setSelectedRouteId(cached[0]?.id || "");
+      setStatusMsg("ROUTE_READY");
+      setCalculating(false);
+      return;
+    }
+
     try {
-      const osrmMode = travelMode;
+      const profileMap: Record<"car" | "bike" | "walk", string> = {
+        car: "driving",
+        bike: "bike",
+        walk: "foot"
+      };
+      const osrmMode = profileMap[selectedTravelMode];
       const url = `https://router.project-osrm.org/route/v1/${osrmMode}/${orig[1]},${orig[0]};${dest[1]},${dest[0]}?overview=full&geometries=geojson&alternatives=true`;
+      
       const res = await fetch(url);
       const data = await res.json();
 
       if (data.code !== "Ok" || !data.routes || data.routes.length === 0) {
-        setStatusMsg("NO_ROUTE");
+        const modeLabel = selectedTravelMode === "bike" ? "Bike" : selectedTravelMode === "walk" ? "Walking" : "Car";
+        setStatusMsg(`${modeLabel} routing is currently unavailable.`);
         setComputedRoutes([]);
         setCalculating(false);
+        clearMapRoutes();
         return;
       }
 
@@ -319,13 +380,12 @@ export default function SafeRouteNav({ reports }: SafeRouteNavProps) {
         const { totalRisk, hazardsOnRoute } = computeRouteRisk(coords, reports);
         
         // Convert risk to a 0-100 safety score (Deterministic)
-        // 0 risk -> 100 score. Each risk point drops score by 15. Floor at 0.
         const safetyScore = Math.max(0, Math.round(100 - (totalRisk * 15)));
         
         const roadQual = safetyScore >= 80 ? "Optimal" : safetyScore >= 50 ? "Moderate" : "Caution Required";
 
         return {
-          _rawRisk: totalRisk, // temporary field for sorting
+          _rawRisk: totalRisk,
           id: `alt_route_${idx}`,
           name: `Route Option ${idx + 1}`,
           distanceKm: parseFloat((r.distance / 1000).toFixed(1)),
@@ -338,33 +398,30 @@ export default function SafeRouteNav({ reports }: SafeRouteNavProps) {
         };
       });
 
-      // Find the best route based on safety score and duration balance
       analyzedRoutes.sort((a: any, b: any) => {
-        // Higher safety is better, shorter duration is better.
-        // Balance formula: (B's safety - A's safety) + (A's duration - B's duration) / 2
         const safetyDiff = b.safetyScore - a.safetyScore;
         const durDiff = (a.durationMinutes - b.durationMinutes) * 0.5; 
         return safetyDiff + durDiff;
       });
 
-      // Best route gets special naming
       if (analyzedRoutes.length > 0) {
         analyzedRoutes[0].id = "safe_route_0";
         analyzedRoutes[0].name = "Recommended Route";
         
-        // Compare with worst route to calculate avoided hazards
         const worstRoute = [...analyzedRoutes].sort((a: any, b: any) => b.hazardsOnRoute.length - a.hazardsOnRoute.length)[0];
         if (worstRoute && worstRoute.id !== analyzedRoutes[0].id) {
           analyzedRoutes[0].hazardCountAvoided = Math.max(0, worstRoute.hazardsOnRoute.length - analyzedRoutes[0].hazardsOnRoute.length);
         }
       }
 
+      routeCache.current.set(cacheKey, analyzedRoutes);
       setComputedRoutes(analyzedRoutes);
       setSelectedRouteId(analyzedRoutes[0].id);
       setStatusMsg("ROUTE_READY");
     } catch (err) {
       setStatusMsg("ERROR: Routing API failure");
       console.error(err);
+      clearMapRoutes();
     }
     setCalculating(false);
   };
@@ -464,9 +521,9 @@ export default function SafeRouteNav({ reports }: SafeRouteNavProps) {
               <div className="flex items-center gap-1 bg-[#F8FAFC] p-1 rounded-xl border border-[#E2E8F0]">
                 <button
                   type="button"
-                  onClick={() => setTravelMode("driving")}
+                  onClick={() => setSelectedTravelMode("car")}
                   className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-                    travelMode === "driving" ? "bg-[#2563EB] text-white shadow-2xs" : "text-[#64748B] hover:text-[#172033]"
+                    selectedTravelMode === "car" ? "bg-[#2563EB] text-white shadow-2xs" : "text-[#64748B] hover:text-[#172033]"
                   }`}
                 >
                   <Car className="w-3.5 h-3.5" />
@@ -474,9 +531,9 @@ export default function SafeRouteNav({ reports }: SafeRouteNavProps) {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setTravelMode("cycling")}
+                  onClick={() => setSelectedTravelMode("bike")}
                   className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-                    travelMode === "cycling" ? "bg-[#2563EB] text-white shadow-2xs" : "text-[#64748B] hover:text-[#172033]"
+                    selectedTravelMode === "bike" ? "bg-[#2563EB] text-white shadow-2xs" : "text-[#64748B] hover:text-[#172033]"
                   }`}
                 >
                   <Bike className="w-3.5 h-3.5" />
@@ -484,9 +541,9 @@ export default function SafeRouteNav({ reports }: SafeRouteNavProps) {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setTravelMode("foot")}
+                  onClick={() => setSelectedTravelMode("walk")}
                   className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-                    travelMode === "foot" ? "bg-[#2563EB] text-white shadow-2xs" : "text-[#64748B] hover:text-[#172033]"
+                    selectedTravelMode === "walk" ? "bg-[#2563EB] text-white shadow-2xs" : "text-[#64748B] hover:text-[#172033]"
                   }`}
                 >
                   <Footprints className="w-3.5 h-3.5" />

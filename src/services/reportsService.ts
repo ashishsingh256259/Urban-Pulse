@@ -28,11 +28,67 @@ import {
 import { uploadReportEvidence } from "./storageService";
 
 // ===================================================
+// CANONICAL SOS IMAGE ASSET & HELPER
+// ===================================================
+
+export const SOS_REPORT_IMAGE = "data:image/svg+xml;utf8," + encodeURIComponent(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="400" height="400">
+  <rect width="400" height="400" fill="#FFFFFF"/>
+  <line x1="200" y1="40" x2="200" y2="10" stroke="#FF3B30" stroke-width="8" stroke-linecap="round"/>
+  <line x1="120" y1="60" x2="100" y2="35" stroke="#FF3B30" stroke-width="8" stroke-linecap="round"/>
+  <line x1="280" y1="60" x2="300" y2="35" stroke="#FF3B30" stroke-width="8" stroke-linecap="round"/>
+  <line x1="70" y1="130" x2="40" y2="120" stroke="#FF3B30" stroke-width="8" stroke-linecap="round"/>
+  <line x1="330" y1="130" x2="360" y2="120" stroke="#FF3B30" stroke-width="8" stroke-linecap="round"/>
+  <path d="M 120 220 A 80 80 0 0 1 280 220 Z" fill="#FF3B30"/>
+  <path d="M 160 160 A 40 40 0 0 1 210 145" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round" fill="none"/>
+  <rect x="185" y="170" width="30" height="70" rx="6" fill="#FFFFFF"/>
+  <rect x="165" y="190" width="70" height="30" rx="6" fill="#FFFFFF"/>
+  <path d="M 100 220 L 300 220 L 280 250 L 120 250 Z" fill="#222222"/>
+  <rect x="100" y="250" width="200" height="20" rx="4" fill="#111111"/>
+  <rect x="50" y="300" width="300" height="60" rx="8" fill="#FF3B30"/>
+  <text x="200" y="342" font-family="Arial, sans-serif" font-weight="900" font-size="34" fill="#FFFFFF" text-anchor="middle" letter-spacing="2">EMERGENCY</text>
+</svg>
+`);
+
+export function getReportDisplayImage(report: {
+  isSos?: boolean;
+  source?: string;
+  category?: string;
+  issueType?: string;
+  title?: string;
+  description?: string;
+  emergencyType?: string;
+  image?: string | null;
+  evidenceUrl?: string | null;
+} | null | undefined): string {
+  if (!report) return "https://images.unsplash.com/photo-1515162305285-0293e4767cc2?auto=format&fit=crop&q=80&w=800";
+
+  const isSosReport = 
+    report.isSos === true || 
+    report.source === "SOS" || 
+    report.source === "EMERGENCY_SOS" ||
+    report.category === "Emergency" || 
+    report.category === "SOS" ||
+    report.issueType === "Emergency" || 
+    report.issueType === "SOS" ||
+    Boolean(report.emergencyType) ||
+    (report.title && (report.title.toUpperCase().includes("SOS") || report.title.toUpperCase().includes("EMERGENCY"))) ||
+    (report.description && (report.description.toUpperCase().includes("SOS") || report.description.toUpperCase().includes("EMERGENCY")));
+
+  if (isSosReport) {
+    return SOS_REPORT_IMAGE;
+  }
+
+  return report.image || report.evidenceUrl || "https://images.unsplash.com/photo-1515162305285-0293e4767cc2?auto=format&fit=crop&q=80&w=800";
+}
+
+// ===================================================
 // CANONICAL FIRESTORE CONVERTER FOR REPORTS
 // ===================================================
 
 export const reportConverter: FirestoreDataConverter<Report> = {
   toFirestore(report: Report): DocumentData {
+    const finalImage = getReportDisplayImage(report);
     const docData: DocumentData = {
       id: report.id,
       userId: report.userId || "",
@@ -48,8 +104,8 @@ export const reportConverter: FirestoreDataConverter<Report> = {
       location: report.location || "Urban Corridor",
       latitude: Number(report.latitude),
       longitude: Number(report.longitude),
-      image: report.image || report.evidenceUrl || null,
-      evidenceUrl: report.evidenceUrl || report.image || null,
+      image: finalImage,
+      evidenceUrl: finalImage,
       reporterEmail: report.reporterEmail || "citizen@urbanpulse.gov",
       reporterName: report.reporterName || "Citizen Reporter",
       assignedTo: report.assignedTo || null,
@@ -102,8 +158,8 @@ export const reportConverter: FirestoreDataConverter<Report> = {
       location: data.location || "Delhi NCR Grid",
       latitude: Number(data.latitude) || 0,
       longitude: Number(data.longitude) || 0,
-      image: data.image || data.evidenceUrl || null,
-      evidenceUrl: data.evidenceUrl || data.image || null,
+      image: getReportDisplayImage({ ...data, isSos }),
+      evidenceUrl: getReportDisplayImage({ ...data, isSos }),
       reporterEmail: data.reporterEmail || "citizen@urbanpulse.gov",
       reporterName: data.reporterName || undefined,
       assignedTo: data.assignedTo || null,

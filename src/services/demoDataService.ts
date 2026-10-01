@@ -1,4 +1,5 @@
 import { Report, Notification, ReportCategory, Priority, RiskLevel } from "../types";
+import { getReportDisplayImage } from "./reportsService";
 
 /**
  * =========================================================================
@@ -18,7 +19,7 @@ import { Report, Notification, ReportCategory, Priority, RiskLevel } from "../ty
  *    consume the SAME 10 records.
  */
 
-export const DEMO_REPORTS: Report[] = [
+export const DEMO_REPORTS: Report[] = ([
   // =========================================================================
   // 1. AI ROAD SCANNER — 4 REPORTS
   // =========================================================================
@@ -525,7 +526,11 @@ export const DEMO_REPORTS: Report[] = [
       ]
     }
   }
-];
+] as Report[]).map(r => ({
+  ...r,
+  image: getReportDisplayImage(r),
+  evidenceUrl: getReportDisplayImage(r)
+}));
 
 // =========================================================================
 // DERIVED NOTIFICATIONS GENERATOR (CENTRALIZED)

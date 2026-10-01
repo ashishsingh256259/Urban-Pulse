@@ -17,6 +17,19 @@ const parseIsoDate = (raw: any): string => {
   return new Date().toISOString();
 };
 
+const getDeterministicFallbackTime = (index: number): string => {
+  const offsets = [
+    1000 * 60 * 5,   // 5 min ago
+    1000 * 60 * 25,  // 25 min ago
+    1000 * 60 * 90,  // 1.5 hours ago
+    1000 * 60 * 180, // 3 hours ago
+    1000 * 60 * 360, // 6 hours ago
+    1000 * 60 * 720  // 12 hours ago
+  ];
+  const offset = offsets[index % offsets.length];
+  return new Date(Date.now() - offset).toISOString();
+};
+
 export function subscribeToNotifications(
   userEmail: string,
   userRole: "citizen" | "admin" | "municipal" | "field_team" | "all",
@@ -47,20 +60,42 @@ export function subscribeToNotifications(
   }
 
   const unsubscribe = onSnapshot(q, (snapshot) => {
-    let notifList: Notification[] = snapshot.docs.map(d => {
+    let notifList: Notification[] = snapshot.docs.map((d, index) => {
       const data = d.data();
+      const rawTitle = data.title;
+      const rawMessage = data.message || data.body || "";
+      const rawType = data.type || "system";
+
+      let derivedTitle = rawTitle;
+      if (!derivedTitle || derivedTitle === "System Operational Alert" || derivedTitle === "Notification") {
+        if (rawType.includes("sos") || rawType.includes("emergency") || rawMessage.toLowerCase().includes("sos")) {
+          derivedTitle = "Emergency SOS Alert";
+        } else if (rawType.includes("report") || rawMessage.toLowerCase().includes("report")) {
+          derivedTitle = "Citizen Report Update";
+        } else if (rawType.includes("task") || rawType.includes("assigned")) {
+          derivedTitle = "Work Order Assignment";
+        } else if (rawMessage) {
+          derivedTitle = rawMessage.length > 45 ? rawMessage.substring(0, 42) + "..." : rawMessage;
+        } else {
+          derivedTitle = "Operational Notification";
+        }
+      }
+
+      const rawDate = data.createdAt || data.timestamp;
+      const parsedDate = rawDate ? parseIsoDate(rawDate) : getDeterministicFallbackTime(index);
+
       return {
         id: d.id,
         recipientEmail: data.recipientEmail || "",
         recipientRole: data.recipientRole || "all",
-        title: data.title || "Notification",
-        message: data.message || "",
-        type: data.type || "system",
+        title: derivedTitle,
+        message: rawMessage || derivedTitle,
+        type: rawType,
         reportId: data.reportId || data.relatedReportId || data.incidentId || "SYSTEM",
         relatedReportId: data.relatedReportId || data.reportId || undefined,
         incidentId: data.incidentId || data.reportId || undefined,
         read: Boolean(data.read ?? data.read_status),
-        createdAt: parseIsoDate(data.createdAt)
+        createdAt: parsedDate
       } as Notification;
     });
 
@@ -91,6 +126,16 @@ export function subscribeToNotifications(
       return false;
     });
 
+    // Strict Deduplication by ID and stable content key
+    const uniqueMap = new Map<string, Notification>();
+    notifList.forEach(n => {
+      const stableKey = n.id || `${n.recipientEmail}-${n.title}-${n.createdAt}`;
+      if (!uniqueMap.has(stableKey)) {
+        uniqueMap.set(stableKey, n);
+      }
+    });
+    notifList = Array.from(uniqueMap.values());
+
     // Sort by createdAt descending
     notifList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
@@ -107,10 +152,17 @@ export function subscribeToNotifications(
         if (Array.isArray(data.notifications)) {
           const parsed = data.notifications.map((n: any) => ({
             ...n,
+            title: n.title || "System Operational Alert",
             createdAt: parseIsoDate(n.createdAt)
           }));
-          parsed.sort((a: Notification, b: Notification) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-          callback(parsed);
+          const uniqueMap = new Map<string, Notification>();
+          parsed.forEach((n: Notification) => {
+            const stableKey = n.id || `${n.recipientEmail}-${n.title}-${n.createdAt}`;
+            if (!uniqueMap.has(stableKey)) uniqueMap.set(stableKey, n);
+          });
+          const deduplicated = Array.from(uniqueMap.values());
+          deduplicated.sort((a: Notification, b: Notification) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          callback(deduplicated);
           apiSuccess = true;
         }
       }
@@ -119,7 +171,13 @@ export function subscribeToNotifications(
     }
 
     if (!apiSuccess) {
-      callback(getDemoNotifications(userEmail, userRole));
+      const demoList = getDemoNotifications(userEmail, userRole);
+      const uniqueMap = new Map<string, Notification>();
+      demoList.forEach(n => {
+        const stableKey = n.id || `${n.recipientEmail}-${n.title}-${n.createdAt}`;
+        if (!uniqueMap.has(stableKey)) uniqueMap.set(stableKey, n);
+      });
+      callback(Array.from(uniqueMap.values()));
     }
   });
 

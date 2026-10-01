@@ -101,6 +101,38 @@ export default function FieldTeamDashboard({
 
   // Tab navigation
   const [activeTab, setActiveTab] = useState<FieldTab>(initialTab || "overview");
+  const [activeMetricFilterName, setActiveMetricFilterName] = useState<string | null>(null);
+
+  const handleMetricClick = (metricType: "assigned" | "inProgress" | "reviewPending" | "critical" | "overdue" | "resolved") => {
+    setSearchQuery("");
+    setPriorityFilter("ALL");
+    if (metricType === "assigned") {
+      setActiveTab("tasks");
+      setStatusFilter("ASSIGNED");
+      setActiveMetricFilterName("Assigned Tasks");
+    } else if (metricType === "inProgress") {
+      setActiveTab("tasks");
+      setStatusFilter("IN_PROGRESS");
+      setActiveMetricFilterName("In Progress Tasks");
+    } else if (metricType === "reviewPending") {
+      setActiveTab("work");
+      setStatusFilter("REVIEW_PENDING");
+      setActiveMetricFilterName("Sign-off Pending Tasks");
+    } else if (metricType === "critical") {
+      setActiveTab("tasks");
+      setPriorityFilter("Critical");
+      setStatusFilter("ALL");
+      setActiveMetricFilterName("Critical Priority Tasks");
+    } else if (metricType === "overdue") {
+      setActiveTab("tasks");
+      setStatusFilter("OVERDUE");
+      setActiveMetricFilterName("Overdue SLA Tasks");
+    } else if (metricType === "resolved") {
+      setActiveTab("work");
+      setStatusFilter("RESOLVED");
+      setActiveMetricFilterName("Resolved & Closed Tasks");
+    }
+  };
 
   useEffect(() => {
     if (initialTab) {
@@ -269,9 +301,17 @@ export default function FieldTeamDashboard({
       }
       if (priorityFilter !== "ALL" && t.priority !== priorityFilter) return false;
       if (statusFilter !== "ALL") {
-        if (statusFilter === "ACTIVE" && (t.status === "Resolved" || t.fieldStatus === "CLOSED")) return false;
-        if (statusFilter === "RESOLVED" && t.status !== "Resolved" && t.fieldStatus !== "CLOSED") return false;
-        if (statusFilter === "OVERDUE") {
+        if (statusFilter === "ASSIGNED") {
+          if (t.fieldStatus && t.fieldStatus !== "ASSIGNED") return false;
+        } else if (statusFilter === "IN_PROGRESS") {
+          if (!["ACCEPTED", "EN_ROUTE", "ON_SITE", "VERIFIED", "ACTION_STARTED"].includes(t.fieldStatus || "")) return false;
+        } else if (statusFilter === "REVIEW_PENDING") {
+          if (t.fieldStatus !== "RESOLUTION_SUBMITTED" && t.fieldStatus !== "MUNICIPAL_REVIEW") return false;
+        } else if (statusFilter === "ACTIVE") {
+          if (t.status === "Resolved" || t.fieldStatus === "CLOSED") return false;
+        } else if (statusFilter === "RESOLVED") {
+          if (t.status !== "Resolved" && t.fieldStatus !== "RESOLVED" && t.fieldStatus !== "CLOSED") return false;
+        } else if (statusFilter === "OVERDUE") {
           const sla = calculateSlaStatus(t.priority, t.assignment?.assignedAt || t.createdAt);
           if (!sla.isOverdue) return false;
         }
@@ -896,31 +936,61 @@ export default function FieldTeamDashboard({
         <div className="flex flex-col gap-6">
           {/* Key Metric Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3.5">
-            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => handleMetricClick("assigned")}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") handleMetricClick("assigned"); }}
+              className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs cursor-pointer hover:border-blue-400 hover:shadow-sm transition-all focus:outline-hidden focus:ring-2 focus:ring-blue-500 text-left"
+            >
               <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Assigned</span>
               <p className="text-2xl font-black text-slate-800 mt-1">{stats.assigned}</p>
               <span className="text-[10px] text-slate-500 font-medium">Awaiting crew action</span>
             </div>
 
-            <div className="bg-white p-4 rounded-2xl border border-blue-200 bg-blue-50/30 shadow-2xs">
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => handleMetricClick("inProgress")}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") handleMetricClick("inProgress"); }}
+              className="bg-white p-4 rounded-2xl border border-blue-200 bg-blue-50/30 shadow-2xs cursor-pointer hover:border-blue-400 hover:shadow-sm transition-all focus:outline-hidden focus:ring-2 focus:ring-blue-500 text-left"
+            >
               <span className="text-[11px] font-bold text-blue-600 uppercase tracking-wider block">In Progress</span>
               <p className="text-2xl font-black text-blue-700 mt-1">{stats.inProgress}</p>
               <span className="text-[10px] text-blue-600 font-medium">Travel / on-site active</span>
             </div>
 
-            <div className="bg-white p-4 rounded-2xl border border-amber-200 bg-amber-50/30 shadow-2xs">
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => handleMetricClick("reviewPending")}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") handleMetricClick("reviewPending"); }}
+              className="bg-white p-4 rounded-2xl border border-amber-200 bg-amber-50/30 shadow-2xs cursor-pointer hover:border-amber-400 hover:shadow-sm transition-all focus:outline-hidden focus:ring-2 focus:ring-amber-500 text-left"
+            >
               <span className="text-[11px] font-bold text-amber-600 uppercase tracking-wider block">Sign-off Pending</span>
               <p className="text-2xl font-black text-amber-700 mt-1">{stats.reviewPending}</p>
               <span className="text-[10px] text-amber-600 font-medium">In municipal queue</span>
             </div>
 
-            <div className="bg-white p-4 rounded-2xl border border-rose-200 bg-rose-50/30 shadow-2xs">
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => handleMetricClick("critical")}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") handleMetricClick("critical"); }}
+              className="bg-white p-4 rounded-2xl border border-rose-200 bg-rose-50/30 shadow-2xs cursor-pointer hover:border-rose-400 hover:shadow-sm transition-all focus:outline-hidden focus:ring-2 focus:ring-rose-500 text-left"
+            >
               <span className="text-[11px] font-bold text-rose-600 uppercase tracking-wider block">Critical</span>
               <p className="text-2xl font-black text-rose-700 mt-1">{stats.critical}</p>
               <span className="text-[10px] text-rose-600 font-medium">High risk hazards</span>
             </div>
 
-            <div className="bg-white p-4 rounded-2xl border border-rose-200 shadow-2xs">
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => handleMetricClick("overdue")}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") handleMetricClick("overdue"); }}
+              className="bg-white p-4 rounded-2xl border border-rose-200 shadow-2xs cursor-pointer hover:border-rose-400 hover:shadow-sm transition-all focus:outline-hidden focus:ring-2 focus:ring-rose-500 text-left"
+            >
               <span className="text-[11px] font-bold text-rose-600 uppercase tracking-wider block">Overdue SLA</span>
               <p className={`text-2xl font-black mt-1 ${stats.overdue > 0 ? "text-rose-600 animate-pulse" : "text-slate-800"}`}>
                 {stats.overdue}
@@ -928,7 +998,13 @@ export default function FieldTeamDashboard({
               <span className="text-[10px] text-slate-500 font-medium">Past SLA window</span>
             </div>
 
-            <div className="bg-white p-4 rounded-2xl border border-emerald-200 bg-emerald-50/30 shadow-2xs">
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => handleMetricClick("resolved")}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") handleMetricClick("resolved"); }}
+              className="bg-white p-4 rounded-2xl border border-emerald-200 bg-emerald-50/30 shadow-2xs cursor-pointer hover:border-emerald-400 hover:shadow-sm transition-all focus:outline-hidden focus:ring-2 focus:ring-emerald-500 text-left"
+            >
               <span className="text-[11px] font-bold text-emerald-600 uppercase tracking-wider block">Resolved</span>
               <p className="text-2xl font-black text-emerald-700 mt-1">{stats.resolved}</p>
               <span className="text-[10px] text-emerald-600 font-medium">Verified & closed</span>
@@ -1091,6 +1167,25 @@ export default function FieldTeamDashboard({
       {/* =================================================== */}
       {activeTab === "tasks" && (
         <div className="flex flex-col gap-5">
+          {statusFilter !== "ALL" || priorityFilter !== "ALL" ? (
+            <div className="bg-blue-50 border border-blue-200 px-4 py-3 rounded-2xl flex items-center justify-between text-xs font-bold text-blue-900">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-blue-600 animate-pulse"></span>
+                <span>Active Filter: {activeMetricFilterName || statusFilter}</span>
+              </div>
+              <button
+                onClick={() => {
+                  setStatusFilter("ALL");
+                  setPriorityFilter("ALL");
+                  setActiveMetricFilterName(null);
+                }}
+                className="text-blue-700 hover:text-blue-900 underline cursor-pointer"
+              >
+                Clear Filter
+              </button>
+            </div>
+          ) : null}
+
           {/* Controls: Search & Filters */}
           <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-3">
             <div className="relative flex-1">
@@ -1596,6 +1691,24 @@ export default function FieldTeamDashboard({
       {/* =================================================== */}
       {activeTab === "work" && (
         <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200 shadow-2xs flex flex-col gap-6 max-w-3xl mx-auto">
+          {statusFilter !== "ALL" || priorityFilter !== "ALL" ? (
+            <div className="bg-blue-50 border border-blue-200 px-4 py-3 rounded-2xl flex items-center justify-between text-xs font-bold text-blue-900">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-blue-600 animate-pulse"></span>
+                <span>Active Filter: {activeMetricFilterName || statusFilter}</span>
+              </div>
+              <button
+                onClick={() => {
+                  setStatusFilter("ALL");
+                  setPriorityFilter("ALL");
+                  setActiveMetricFilterName(null);
+                }}
+                className="text-blue-700 hover:text-blue-900 underline cursor-pointer"
+              >
+                Clear Filter
+              </button>
+            </div>
+          ) : null}
           <div>
             <h3 className="text-lg font-black text-slate-900">Record Repair & Submit Resolution</h3>
             <p className="text-xs text-slate-500 mt-1">

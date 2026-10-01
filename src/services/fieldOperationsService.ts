@@ -287,17 +287,17 @@ export interface SlaCalculation {
  * - Medium: 24 hours
  * - Low: 48 hours
  */
-export function calculateSlaStatus(priority?: Priority, assignedAt?: string): SlaCalculation {
+export function calculateSlaStatus(priority?: Priority, assignedAt?: string, dueAt?: string, slaDuration?: number): SlaCalculation {
   const hoursMap: Record<string, number> = {
     Critical: 4,
-    High: 12,
-    Medium: 24,
-    Low: 48
+    High: 24,
+    Medium: 72,
+    Low: 168
   };
 
-  const targetHours = hoursMap[priority || "Medium"] || 24;
+  const targetHours = slaDuration || hoursMap[priority || "Medium"] || 24;
   const startTime = assignedAt ? new Date(assignedAt).getTime() : Date.now();
-  const deadlineTime = startTime + (targetHours * 60 * 60 * 1000);
+  const deadlineTime = dueAt ? new Date(dueAt).getTime() : (startTime + (targetHours * 60 * 60 * 1000));
   const now = Date.now();
   const diffMinutes = Math.round((deadlineTime - now) / (60 * 1000));
 
@@ -305,11 +305,11 @@ export function calculateSlaStatus(priority?: Priority, assignedAt?: string): Sl
   const isApproaching = !isOverdue && diffMinutes <= (targetHours * 60 * 0.25); // within 25% of SLA window
 
   let statusLabel: "Within SLA" | "Approaching SLA" | "Overdue" = "Within SLA";
-  let statusColor = "text-emerald-700 bg-emerald-50 border-emerald-200";
+  let statusColor = "text-emerald-700 bg-emerald-50 border-emerald-200 font-bold";
 
   if (isOverdue) {
     statusLabel = "Overdue";
-    statusColor = "text-rose-700 bg-rose-50 border-rose-200 font-bold";
+    statusColor = "text-rose-700 bg-rose-50 border-rose-200 font-extrabold animate-pulse";
   } else if (isApproaching) {
     statusLabel = "Approaching SLA";
     statusColor = "text-amber-700 bg-amber-50 border-amber-200 font-bold";
@@ -406,7 +406,7 @@ export async function assignFieldTask(
   slaHours?: number
 ): Promise<void> {
   const now = new Date().toISOString();
-  const calculatedHours = slaHours || (priority === "Critical" ? 4 : priority === "High" ? 12 : priority === "Medium" ? 24 : 48);
+  const calculatedHours = slaHours || (priority === "Critical" ? 4 : priority === "High" ? 24 : priority === "Medium" ? 72 : 168);
   const slaDeadline = new Date(Date.now() + calculatedHours * 60 * 60 * 1000).toISOString();
 
   // 1. Check Team Availability in Firestore
@@ -467,6 +467,9 @@ export async function assignFieldTask(
         assignedTo: teamName,
         assignedTeamId: teamId,
         assignedTeamName: teamName,
+        assignedAt: now,
+        slaDuration: calculatedHours,
+        dueAt: slaDeadline,
         priority,
         fieldStatus: "ASSIGNED",
         workflowState: "ASSIGNED",
@@ -566,7 +569,7 @@ export async function reassignFieldTask(
     }
   }
 
-  const calculatedHours = currentPriority === "Critical" ? 4 : currentPriority === "High" ? 12 : currentPriority === "Medium" ? 24 : 48;
+  const calculatedHours = currentPriority === "Critical" ? 4 : currentPriority === "High" ? 24 : currentPriority === "Medium" ? 72 : 168;
   const slaDeadline = new Date(Date.now() + calculatedHours * 60 * 60 * 1000).toISOString();
 
   const reassignmentRecord: ReassignmentRecord = {
@@ -611,6 +614,9 @@ export async function reassignFieldTask(
         assignedTo: newTeamName,
         assignedTeamId: newTeamId,
         assignedTeamName: newTeamName,
+        assignedAt: now,
+        slaDuration: calculatedHours,
+        dueAt: slaDeadline,
         priority: currentPriority,
         fieldStatus: "ASSIGNED",
         workflowState: "ASSIGNED",

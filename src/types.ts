@@ -253,6 +253,14 @@ export interface Report {
   assignedTo: string | null;
   assignedTeamId?: string | null;
   assignedTeamName?: string | null;
+  assignedAt?: string | null;
+  slaDuration?: number | null;
+  dueAt?: string | null;
+  isDuplicate?: boolean;
+  duplicateOfReportId?: string | null;
+  duplicateGroupId?: string | null;
+  duplicateDetectedAt?: string | null;
+  duplicateDistanceMeters?: number;
   source?: ReportSource;
   roadScanId?: string;
   clusterCount?: number;

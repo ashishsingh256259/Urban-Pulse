@@ -25,8 +25,8 @@ export const UrbanRiskMap: React.FC<UrbanRiskMapProps> = ({
 
   const [riskFilter, setRiskFilter] = useState<"all" | "road" | "infrastructure" | "sanitation" | "critical">("all");
   const [selectedZone, setSelectedZone] = useState<string | null>("Sector 62");
-  const [selectedReportState, setSelectedReportState] = useState<Report | null>(reports[0] || null);
-  const [isDrawerOpen, setIsDrawerOpen] = useState(true);
+  const [selectedReportState, setSelectedReportState] = useState<Report | null>(null);
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
 
   // Filter reports according to selected risk filter
   const filteredReports = useMemo(() => {
@@ -169,8 +169,8 @@ export const UrbanRiskMap: React.FC<UrbanRiskMapProps> = ({
       {/* Main Map + Side Intelligence Drawer */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
         
-        {/* Leaflet Map (Span 8 on desktop) */}
-        <div className="lg:col-span-8 bg-white border border-[#E2E8F0] rounded-3xl p-4 shadow-xs">
+        {/* Leaflet Map */}
+        <div className={`${isDrawerOpen && selectedReportState ? "lg:col-span-8" : "lg:col-span-12"} bg-white border border-[#E2E8F0] rounded-3xl p-4 shadow-xs transition-all duration-200`}>
           <div className="flex items-center justify-between mb-3 px-2">
             <div>
               <h3 className="text-sm font-bold text-[#172033]">
@@ -202,31 +202,48 @@ export const UrbanRiskMap: React.FC<UrbanRiskMapProps> = ({
         </div>
 
         {/* SIGNATURE INTERACTION: Zone Intelligence Drawer (Span 4) */}
-        <div className="lg:col-span-4 bg-white border border-[#2563EB]/30 ring-1 ring-[#2563EB]/10 rounded-3xl p-5 shadow-sm flex flex-col gap-4">
-          
-          <div className="flex items-center justify-between pb-3 border-b border-[#F1F5F9]">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-[#EFF6FF] text-[#2563EB] flex items-center justify-center font-bold">
-                <Building2 className="w-4 h-4" />
+        {isDrawerOpen && selectedReportState && (
+          <div className="lg:col-span-4 bg-white border border-[#2563EB]/30 ring-1 ring-[#2563EB]/10 rounded-3xl p-5 shadow-sm flex flex-col gap-4 animate-in fade-in duration-150">
+            
+            <div className="flex items-center justify-between pb-3 border-b border-[#F1F5F9]">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-[#EFF6FF] text-[#2563EB] flex items-center justify-center font-bold">
+                  <Building2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <span className="text-[9.5px] font-mono font-bold uppercase text-[#2563EB] block">
+                    GIS INCIDENT INSPECTOR
+                  </span>
+                  <h3 className="text-sm font-black text-[#172033] leading-tight">
+                    {activeZoneName}
+                  </h3>
+                </div>
               </div>
-              <div>
-                <span className="text-[9.5px] font-mono font-bold uppercase text-[#2563EB] block">
-                  ZONE INTELLIGENCE
+
+              <div className="flex items-center gap-2">
+                <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${
+                  zoneRiskLevel === "CRITICAL" ? "bg-[#FEF2F2] text-[#DC2626] border-[#FECACA]" :
+                  zoneRiskLevel === "HIGH" ? "bg-[#FFFBEB] text-[#D97706] border-[#FDE68A]" :
+                  "bg-[#F0FDF4] text-[#16A34A] border-[#BBF7D0]"
+                }`}>
+                  {zoneRiskLevel} RISK
                 </span>
-                <h3 className="text-sm font-black text-[#172033] leading-tight">
-                  {activeZoneName}
-                </h3>
+
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsDrawerOpen(false);
+                    setSelectedReportState(null);
+                  }}
+                  className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer border border-slate-200"
+                  title="Close Inspector"
+                  aria-label="Close Inspector"
+                >
+                  <X className="w-4 h-4" />
+                </button>
               </div>
             </div>
-
-            <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${
-              zoneRiskLevel === "CRITICAL" ? "bg-[#FEF2F2] text-[#DC2626] border-[#FECACA]" :
-              zoneRiskLevel === "HIGH" ? "bg-[#FFFBEB] text-[#D97706] border-[#FDE68A]" :
-              "bg-[#F0FDF4] text-[#16A34A] border-[#BBF7D0]"
-            }`}>
-              {zoneRiskLevel} RISK
-            </span>
-          </div>
 
           {/* Key Metrics of this Zone */}
           <div className="grid grid-cols-3 gap-2 bg-[#F8FAFC] p-3 rounded-2xl border border-[#E2E8F0] text-center">
@@ -332,6 +349,7 @@ export const UrbanRiskMap: React.FC<UrbanRiskMapProps> = ({
           </div>
 
         </div>
+        )}
 
       </div>
 

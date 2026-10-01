@@ -28,6 +28,8 @@ import FieldVerificationCenter from "./components/FieldVerificationCenter";
 import CityInsights from "./components/CityInsights";
 import MunicipalDesignLoopHeader from "./components/MunicipalDesignLoopHeader";
 import ExecutiveAnalytics from "./components/ExecutiveAnalytics";
+import DuplicateReportsView from "./components/DuplicateReportsView";
+import { processReportsForDuplicates } from "./utils/duplicateDetection";
 import SmartCityDigitalTwin from "./components/SmartCityDigitalTwin";
 import AreaProfilePages from "./components/AreaProfilePages";
 import CityHealthReport from "./components/CityHealthReport";
@@ -167,42 +169,46 @@ export default function App() {
   // High-fidelity sidebar terminal states
   const [activeTerminal, setActiveTerminal] = useState<"citizen" | "admin" | "field_team" | "split">("citizen");
   const [activeSubTab, setActiveSubTab] = useState<
-    "citizen-home" | "my-reports" | "municipal-home" | "command-center" | "citizen-signals" | "incident-intelligence" | "field-verification" | "infrastructure" | "dispatch-management" | "road-scanner" | "candidate-review" | "safe-route" | "rewards" | "emergency-sos" | "copilot" | "analytics" | "digital-twin" | "safety" | "traffic" | "environmental" | "emergency" | "field-operations" | "admin-panel" | "admin-users" | "admin-teams" | "admin-settings" | "gis-navigation" | "safety-sos" | "field-copilot" | "team-profile"
+    "citizen-home" | "my-reports" | "municipal-home" | "command-center" | "citizen-signals" | "incident-intelligence" | "field-verification" | "infrastructure" | "dispatch-management" | "road-scanner" | "candidate-review" | "safe-route" | "rewards" | "emergency-sos" | "copilot" | "analytics" | "digital-twin" | "safety" | "traffic" | "environmental" | "emergency" | "field-operations" | "admin-panel" | "admin-users" | "admin-teams" | "admin-settings" | "gis-navigation" | "safety-sos" | "field-copilot" | "team-profile" | "duplicate-reports"
   >("citizen-home");
+
+  const processedReports = useMemo(() => {
+    return processReportsForDuplicates(reports);
+  }, [reports]);
 
   const [muniKpiFilter, setMuniKpiFilter] = useState<
     "critical" | "high" | "under-review" | "in-progress" | "resolved" | null
   >(null);
 
   const reportsForIncidentIntelligence = useMemo(() => {
-    if (!muniKpiFilter) return reports;
+    if (!muniKpiFilter) return processedReports;
     if (muniKpiFilter === "critical") {
-      return reports.filter(r => (r.priority === "Critical" || r.severity >= 75) && r.status !== "Resolved");
+      return processedReports.filter(r => (r.priority === "Critical" || r.severity >= 75) && r.status !== "Resolved");
     }
     if (muniKpiFilter === "high") {
-      return reports.filter(r => (r.priority === "High" || (r.severity >= 50 && r.severity < 75)) && r.status !== "Resolved");
+      return processedReports.filter(r => (r.priority === "High" || (r.severity >= 50 && r.severity < 75)) && r.status !== "Resolved");
     }
-    return reports;
-  }, [reports, muniKpiFilter]);
+    return processedReports;
+  }, [processedReports, muniKpiFilter]);
 
   const reportsForDispatchResponse = useMemo(() => {
-    if (!muniKpiFilter) return reports;
+    if (!muniKpiFilter) return processedReports;
     if (muniKpiFilter === "under-review") {
-      return reports.filter(r => r.status === "Pending");
+      return processedReports.filter(r => r.status === "Pending");
     }
     if (muniKpiFilter === "in-progress") {
-      return reports.filter(r => r.status === "In Progress" || r.status === "Assigned");
+      return processedReports.filter(r => r.status === "In Progress" || r.status === "Assigned");
     }
-    return reports;
-  }, [reports, muniKpiFilter]);
+    return processedReports;
+  }, [processedReports, muniKpiFilter]);
 
   const reportsForFieldVerification = useMemo(() => {
-    if (!muniKpiFilter) return reports;
+    if (!muniKpiFilter) return processedReports;
     if (muniKpiFilter === "resolved") {
-      return reports.filter(r => r.status === "Resolved");
+      return processedReports.filter(r => r.status === "Resolved");
     }
-    return reports;
-  }, [reports, muniKpiFilter]);
+    return processedReports;
+  }, [processedReports, muniKpiFilter]);
 
   // On mount and role change, reset to correct home
   useEffect(() => {
@@ -742,6 +748,7 @@ export default function App() {
       items: [
         { id: "incident-intelligence", label: t("nav.incidentIntelligence", "Incident Intelligence"), desc: t("nav.incidentIntelligenceDesc", "3-panel analyst workspace"), icon: Sparkles },
         { id: "safety", label: t("nav.urbanRiskMap", "Urban Risk Map"), desc: t("nav.urbanRiskMapDesc", "Spatial risk concentration"), icon: MapPin },
+        { id: "duplicate-reports", label: isHindi ? "डुप्लीकेट रिपोर्ट" : "Duplicate Reports", desc: "Spatial deduplication ledger", icon: Layers },
       ]
     },
     {
@@ -773,6 +780,7 @@ export default function App() {
         { id: "admin-panel", label: t("nav.adminPanel", "Admin Console"), desc: t("nav.adminPanelDesc", "Platform governance console"), icon: Shield },
         { id: "admin-users", label: t("nav.userManagement", "User Management"), desc: t("nav.userManagementDesc", "User credentials & role clearances"), icon: Users },
         { id: "admin-teams", label: t("nav.teamManagement", "Team Management"), desc: t("nav.teamManagementDesc", "Field squad roster & zones"), icon: Briefcase },
+        { id: "duplicate-reports", label: isHindi ? "डुप्लीकेट रिपोर्ट" : "Duplicate Reports", desc: "Spatial deduplication ledger", icon: Layers },
       ]
     },
     {
@@ -1764,24 +1772,8 @@ export default function App() {
                 </div>
               </RoleGuard>
             )}
-            
-            {activeSubTab === "road-scanner" && (
-                <RoleGuard allowedRoles={["field_team"]}>
-                    <RoadScanner
-                        onCandidatesReady={() => {}}
-                        onIncidentAutoReported={(newRep) => {
-                            setReports(prev => [newRep, ...prev]);
-                            setSelectedReport(newRep);
-                            syncOperationalDatasets(currentUser.email, currentUser.role);
-                        }}
-                        onSwitchToManual={() => {}}
-                        onSelectReport={(rep) => setSelectedReport(rep)}
-                        currentUserEmail={currentUser.email}
-                    />
-                </RoleGuard>
-            )}
 
-            {activeSubTab === "incident-map" && (
+            {(activeSubTab === "safety" || activeSubTab === "incident-map") && (
               <RoleGuard allowedRoles={["municipal", "admin"]}>
                 <div className="w-full">
                   <UrbanRiskMap
@@ -1833,6 +1825,18 @@ export default function App() {
                     selectedReport={selectedReport}
                     onSelectReport={(rep) => setSelectedReport(rep)}
                     onRefreshReports={() => syncOperationalDatasets(currentUser.email, currentUser.role)}
+                  />
+                </div>
+              </RoleGuard>
+            )}
+
+            {/* DUPLICATE REPORTS VIEW */}
+            {activeSubTab === "duplicate-reports" && (
+              <RoleGuard allowedRoles={["municipal", "admin"]}>
+                <div className="w-full">
+                  <DuplicateReportsView
+                    reports={reports}
+                    onSelectReport={(rep) => setSelectedReport(rep)}
                   />
                 </div>
               </RoleGuard>

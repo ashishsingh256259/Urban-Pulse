@@ -120,7 +120,7 @@ export const DispatchManagement: React.FC<DispatchManagementProps> = ({
     return fieldTeams.map(team => {
       // Find all active incidents assigned to this team
       const activeIncidents = reports.filter(r => {
-        if (r.status === "Resolved" || r.fieldStatus === "CLOSED") return false;
+        if (r.status === "Resolved" || r.status === "REJECTED" || r.fieldStatus === "CLOSED") return false;
         const assignedTeamId = r.assignment?.teamId || r.assignment?.fieldTeamId;
         if (assignedTeamId === team.id) return true;
         if (r.assignedTo && (r.assignedTo.includes(team.id) || r.assignedTo.toLowerCase() === team.name.toLowerCase())) return true;
@@ -191,6 +191,7 @@ export const DispatchManagement: React.FC<DispatchManagementProps> = ({
   // Filtered reports list
   const filteredReports = useMemo(() => {
     return reports.filter(rep => {
+      if (rep.status === "REJECTED") return false;
       // Tab filter
       if (tabFilter === "UNASSIGNED" && (rep.assignedTo || rep.status === "Resolved")) return false;
       if (tabFilter === "DISPATCHED" && (!rep.assignedTo || rep.fieldStatus === "RESOLUTION_SUBMITTED" || rep.status === "Resolved")) return false;
@@ -230,7 +231,7 @@ export const DispatchManagement: React.FC<DispatchManagementProps> = ({
     setSelectedSquadId(firstAvailable?.id || "");
     const currentPriority = rep.priority || "Medium";
     setAssignPriority(currentPriority);
-    setCustomSlaHours(currentPriority === "Critical" ? 4 : currentPriority === "High" ? 12 : currentPriority === "Medium" ? 24 : 48);
+    setCustomSlaHours(currentPriority === "Critical" ? 4 : currentPriority === "High" ? 24 : currentPriority === "Medium" ? 72 : 168);
     setDispatchInstructions("");
     setReassignReason(rep.assignment?.reassignmentReason || "Operational re-routing to specialized squad");
   };
@@ -1152,14 +1153,14 @@ export const DispatchManagement: React.FC<DispatchManagementProps> = ({
                   onChange={(e) => {
                     const p = e.target.value as Priority;
                     setAssignPriority(p);
-                    setCustomSlaHours(p === "Critical" ? 4 : p === "High" ? 12 : p === "Medium" ? 24 : 48);
+                    setCustomSlaHours(p === "Critical" ? 4 : p === "High" ? 24 : p === "Medium" ? 72 : 168);
                   }}
                   className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl px-3 py-2 text-xs font-bold text-[#172033] focus:outline-hidden focus:border-[#2563EB] cursor-pointer"
                 >
                   <option value="Critical">Critical (P1) - 4 Hour SLA</option>
-                  <option value="High">High (P2) - 12 Hour SLA</option>
-                  <option value="Medium">Medium (P3) - 24 Hour SLA</option>
-                  <option value="Low">Low (P4) - 48 Hour SLA</option>
+                  <option value="High">High (P2) - 24 Hour SLA</option>
+                  <option value="Medium">Medium (P3) - 3 Days SLA</option>
+                  <option value="Low">Low (P4) - 7 Days SLA</option>
                 </select>
               </div>
 
@@ -1207,6 +1208,35 @@ export const DispatchManagement: React.FC<DispatchManagementProps> = ({
                 className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl p-3 text-xs text-[#172033] focus:outline-hidden focus:border-[#2563EB] resize-none"
               />
             </div>
+
+            {/* ASSIGNMENT CONFIRMATION SUMMARY CARD */}
+            {selectedSquadId && (
+              <div className="p-4 bg-blue-50/70 border border-blue-200 rounded-2xl space-y-2 text-xs">
+                <span className="text-[10px] font-mono font-black uppercase text-blue-700 block">
+                  ASSIGNMENT SUMMARY & TARGET COMPLETION
+                </span>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-slate-800">
+                  <div>
+                    <span className="text-[9.5px] text-slate-500 block uppercase font-medium">Assign To</span>
+                    <strong className="text-slate-900 truncate block font-bold">{computedTeams.find(t => t.id === selectedSquadId)?.name || "Selected Team"}</strong>
+                  </div>
+                  <div>
+                    <span className="text-[9.5px] text-slate-500 block uppercase font-medium">Priority</span>
+                    <strong className="text-slate-900 block font-bold">{assignPriority}</strong>
+                  </div>
+                  <div>
+                    <span className="text-[9.5px] text-slate-500 block uppercase font-medium">Target Completion</span>
+                    <strong className="text-blue-700 block font-extrabold">{customSlaHours >= 24 ? `${Math.round(customSlaHours / 24)} Days` : `${customSlaHours} Hours`}</strong>
+                  </div>
+                  <div>
+                    <span className="text-[9.5px] text-slate-500 block uppercase font-medium">Due At</span>
+                    <strong className="text-slate-900 block font-mono font-bold">
+                      {new Date(Date.now() + customSlaHours * 60 * 60 * 1000).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                    </strong>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Modal Actions */}
             <div className="flex items-center justify-end gap-3 pt-4 border-t border-[#E2E8F0]">

@@ -44,7 +44,7 @@ export default function CityCommandCenter({
   };
 
   // Real data metrics
-  const activeReports = reports.filter(r => r.status !== "Resolved");
+  const activeReports = reports.filter(r => r.status !== "Resolved" && r.status !== "REJECTED");
   const criticalActive = activeReports.filter(r => r.severity >= 75);
   const highPriority = activeReports.filter(r => r.severity >= 50 && r.severity < 75);
   const underReview = activeReports.filter(r => r.status === "Pending");

@@ -116,6 +116,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const filteredAdminReports = reports.filter(r => {
     if (!r) return false;
     
+    // Exclude rejected reports from general registry unless explicitly filtering by REJECTED status
+    if (r.status === "REJECTED" && reportStatusFilter !== "REJECTED") return false;
+    
     // Source filter
     if (reportSourceFilter === "ROAD_SCANNER") {
       if (r.source !== "ROAD_SCANNER" && (r as any).source !== "AI_SCANNER") return false;

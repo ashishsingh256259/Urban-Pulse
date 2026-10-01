@@ -131,16 +131,331 @@ async function getBase64ImageFromUrl(imageUrl: string): Promise<string | null> {
 }
 
 /**
- * Generates and downloads a clean, professional PDF incident report.
+ * Generates and downloads a compact, professional one-page Emergency SOS incident report.
  */
-export async function downloadReportPDF(report: Report): Promise<void> {
+export async function generateEmergencySOSReport(report: Report): Promise<void> {
   const doc = new jsPDF({
     orientation: "portrait",
     unit: "mm",
     format: "a4"
   });
 
+  const pageWidth = 210;
+  const pageHeight = 297;
+  const margin = 14;
+  const contentWidth = pageWidth - margin * 2;
+  let cursorY = 0;
+
+  // 1. TOP HEADER BANNER (Emergency Red)
+  const headerHeight = 26;
+  doc.setFillColor(185, 28, 28); // Deep Emergency Red #B91C1C
+  doc.rect(0, 0, pageWidth, headerHeight, "F");
+
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(15);
+  doc.text("URBANPULSE GUARDIAN AI", margin, 11);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8.5);
+  doc.setTextColor(254, 202, 202);
+  doc.text("EMERGENCY SOS INCIDENT REPORT", margin, 18);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8.5);
+  doc.text("CRITICAL BEACON", pageWidth - margin, 11, { align: "right" });
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7.5);
+  doc.setTextColor(254, 226, 226);
+  const genTime = new Date().toLocaleString();
+  doc.text(`Generated: ${genTime}`, pageWidth - margin, 17, { align: "right" });
+  doc.text(`SOS Ticket: #${report.id}`, pageWidth - margin, 21.5, { align: "right" });
+
+  cursorY = headerHeight + 8;
+
+  // 2. SOS / EMERGENCY STATUS CARD
+  doc.setFillColor(254, 242, 242); // light red background
+  doc.setDrawColor(254, 202, 202);
+  doc.roundedRect(margin, cursorY, contentWidth, 20, 2, 2, "FD");
+
+  doc.setFillColor(185, 28, 28);
+  doc.roundedRect(margin + 4, cursorY + 3.5, 36, 13, 1.5, 1.5, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8.5);
+  doc.text("CRITICAL / URGENT", margin + 22, cursorY + 11.5, { align: "center" });
+
+  doc.setTextColor(100, 116, 139);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(7.5);
+  doc.text("INCIDENT TYPE", margin + 46, cursorY + 7);
+  doc.text("DATE & TIME", margin + 120, cursorY + 7);
+
+  doc.setTextColor(15, 23, 42);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9.5);
+  doc.text(report.category || report.issueType || "Emergency SOS Beacon", margin + 46, cursorY + 14);
+  
+  const dateTimeStr = report.createdAt ? new Date(report.createdAt).toLocaleString() : "";
+  if (dateTimeStr) {
+    doc.text(dateTimeStr, margin + 120, cursorY + 14);
+  }
+
+  cursorY += 26;
+
+  // 3. LOCATION SECTION
+  const hasLocation = report.location || (report.latitude !== undefined && report.longitude !== undefined && report.latitude !== null && report.longitude !== null);
+  if (hasLocation) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(185, 28, 28);
+    doc.text("LOCATION", margin, cursorY);
+    cursorY += 4;
+
+    doc.setLineWidth(0.2);
+    doc.setDrawColor(226, 232, 240);
+    doc.line(margin, cursorY, pageWidth - margin, cursorY);
+    cursorY += 5;
+
+    if (report.location) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.setTextColor(71, 85, 105);
+      doc.text("Location / Address:", margin, cursorY);
+
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(15, 23, 42);
+      const splitLoc = doc.splitTextToSize(report.location, contentWidth - 35);
+      doc.text(splitLoc, margin + 35, cursorY);
+      cursorY += Math.max(5, splitLoc.length * 4.5);
+    }
+
+    if (report.latitude !== undefined && report.longitude !== undefined && report.latitude !== null && report.longitude !== null) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.setTextColor(71, 85, 105);
+      doc.text("Live GPS Coordinates:", margin, cursorY);
+
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(15, 23, 42);
+      doc.text(`${report.latitude.toFixed(6)}° N, ${report.longitude.toFixed(6)}° E`, margin + 35, cursorY);
+      cursorY += 5;
+    }
+
+    cursorY += 3;
+  }
+
+  // 4. REPORTER SECTION (only if available)
+  const hasReporter = report.reporterName || report.reporterEmail;
+  if (hasReporter) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(185, 28, 28);
+    doc.text("REPORTER", margin, cursorY);
+    cursorY += 4;
+
+    doc.line(margin, cursorY, pageWidth - margin, cursorY);
+    cursorY += 5;
+
+    if (report.reporterName) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.setTextColor(71, 85, 105);
+      doc.text("Reporter Name:", margin, cursorY);
+
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(15, 23, 42);
+      doc.text(report.reporterName, margin + 35, cursorY);
+      cursorY += 5;
+    }
+
+    if (report.reporterEmail) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.setTextColor(71, 85, 105);
+      doc.text("Contact Information:", margin, cursorY);
+
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(15, 23, 42);
+      doc.text(report.reporterEmail, margin + 35, cursorY);
+      cursorY += 5;
+    }
+
+    cursorY += 3;
+  }
+
+  // 5. EMERGENCY DETAILS
+  const hasDetails = report.title || report.description;
+  if (hasDetails) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(185, 28, 28);
+    doc.text("EMERGENCY DETAILS", margin, cursorY);
+    cursorY += 4;
+
+    doc.line(margin, cursorY, pageWidth - margin, cursorY);
+    cursorY += 5;
+
+    if (report.title) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.setTextColor(71, 85, 105);
+      doc.text("Emergency Title:", margin, cursorY);
+
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(15, 23, 42);
+      doc.text(report.title, margin + 35, cursorY);
+      cursorY += 5;
+    }
+
+    if (report.description) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.setTextColor(71, 85, 105);
+      doc.text("Citizen Details:", margin, cursorY);
+
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(15, 23, 42);
+      const splitDesc = doc.splitTextToSize(report.description, contentWidth - 35);
+      doc.text(splitDesc, margin + 35, cursorY);
+      cursorY += Math.max(5, splitDesc.length * 4.5);
+    }
+
+    cursorY += 3;
+  }
+
+  // 6. RESPONSE SECTION
+  const assignedUnit = report.assignedTo || report.assignment?.teamName;
+  const hasResponse = report.status || assignedUnit || report.fieldStatus;
+  if (hasResponse) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(185, 28, 28);
+    doc.text("RESPONSE", margin, cursorY);
+    cursorY += 4;
+
+    doc.line(margin, cursorY, pageWidth - margin, cursorY);
+    cursorY += 5;
+
+    if (report.status) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.setTextColor(71, 85, 105);
+      doc.text("Current Status:", margin, cursorY);
+
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(15, 23, 42);
+      doc.text(report.status, margin + 35, cursorY);
+      cursorY += 5;
+    }
+
+    if (assignedUnit) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.setTextColor(71, 85, 105);
+      doc.text("Assigned Response Unit:", margin, cursorY);
+
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(15, 23, 42);
+      doc.text(assignedUnit, margin + 35, cursorY);
+      cursorY += 5;
+    }
+
+    const dispatchStatus = report.fieldStatus || (assignedUnit ? "Dispatched & Active" : "Pending Dispatch");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.setTextColor(71, 85, 105);
+    doc.text("Dispatch Status:", margin, cursorY);
+
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(15, 23, 42);
+    doc.text(dispatchStatus, margin + 35, cursorY);
+    cursorY += 6;
+  }
+
+  // 7. EVIDENCE SECTION (ONLY IF AVAILABLE)
+  const imageSource = report.image || report.imageUrl || report.evidenceUrl;
+  if (imageSource && cursorY < pageHeight - 55) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(185, 28, 28);
+    doc.text("EVIDENCE", margin, cursorY);
+    cursorY += 4;
+
+    doc.line(margin, cursorY, pageWidth - margin, cursorY);
+    cursorY += 5;
+
+    const base64Data = await getBase64ImageFromUrl(imageSource);
+    if (base64Data) {
+      try {
+        const imgWidth = 50;
+        const imgHeight = 32;
+        doc.setFillColor(15, 23, 42);
+        doc.roundedRect(margin, cursorY, imgWidth + 2, imgHeight + 2, 1, 1, "F");
+        doc.addImage(base64Data, "JPEG", margin + 1, cursorY + 1, imgWidth, imgHeight);
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8);
+        doc.setTextColor(71, 85, 105);
+        doc.text("SOS Image Attachment", margin + imgWidth + 6, cursorY + 8);
+
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(7.5);
+        doc.setTextColor(100, 116, 139);
+        doc.text("Verified Emergency Photo", margin + imgWidth + 6, cursorY + 13);
+
+        cursorY += imgHeight + 6;
+      } catch (err) {
+        // fallback if image fails
+      }
+    }
+  }
+
+  // 8. IMMEDIATE RESPONSE REQUIRED BANNER (Visually Prominent)
+  if (cursorY < pageHeight - 22) {
+    cursorY = Math.max(cursorY, pageHeight - 36);
+  }
+  doc.setFillColor(254, 226, 226);
+  doc.setDrawColor(239, 68, 68);
+  doc.roundedRect(margin, cursorY, contentWidth, 12, 2, 2, "FD");
+
+  doc.setTextColor(185, 28, 28);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8.5);
+  doc.text("IMMEDIATE RESPONSE REQUIRED - DISPATCH NEAREST EMERGENCY CREW", pageWidth / 2, cursorY + 7.5, { align: "center" });
+
+  // FOOTER
+  const footerY = pageHeight - 8;
+  doc.setDrawColor(226, 232, 240);
+  doc.line(margin, footerY - 4, pageWidth - margin, footerY - 4);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(7);
+  doc.setTextColor(148, 163, 184);
+  doc.text("URBANPULSE GUARDIAN AI • EMERGENCY SOS COMMAND NETWORK", margin, footerY);
+
+  doc.setFont("helvetica", "normal");
+  doc.text("CONFIDENTIAL EMERGENCY DOSSIER", pageWidth - margin, footerY, { align: "right" });
+
+  doc.save(`UrbanPulse_Emergency_SOS_${report.id.replace(/[^a-zA-Z0-9_-]/g, "_")}.pdf`);
+}
+
+/**
+ * Generates and downloads a clean, professional PDF incident report.
+ */
+export async function downloadReportPDF(report: Report): Promise<void> {
   const isSos = isEmergencySosReport(report);
+  if (isSos) {
+    return generateEmergencySOSReport(report);
+  }
+
+  const doc = new jsPDF({
+    orientation: "portrait",
+    unit: "mm",
+    format: "a4"
+  });
+
   const pageWidth = 210;
   const pageHeight = 297;
   const margin = 14;

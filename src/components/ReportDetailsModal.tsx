@@ -12,6 +12,7 @@ import ReportExportButton from "./ReportExportButton";
 import { db } from "../lib/firebase";
 import { isDemoModeActive, DEMO_REPORTS } from "../services/demoDataService";
 import { createNotification } from "../services/notificationsService";
+import { SOS_EMERGENCY_IMAGE, getSlaStatus } from "../utils/slaUtils";
 
 interface ReportDetailsModalProps {
   report: Report | null;
@@ -340,7 +341,114 @@ export default function ReportDetailsModal({
         </div>
 
         {/* Scrollable contents */}
-        <div className="overflow-y-auto flex-1 p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+        {isSos ? (
+          <div className="overflow-y-auto flex-1 p-6 space-y-5 text-left bg-slate-50/50">
+            <div className="bg-white border-2 border-red-500/40 rounded-3xl p-6 shadow-xl space-y-5">
+              
+              {/* Emergency Banner Header */}
+              <div className="flex items-center justify-between pb-4 border-b border-red-100">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-black bg-red-600 text-white px-3 py-1 rounded-xl uppercase tracking-wider flex items-center gap-1.5 shadow-xs">
+                    <span>🚨</span>
+                    <span>EMERGENCY SOS BEACON</span>
+                  </span>
+                  <span className="text-xs font-mono font-bold text-red-700 bg-red-50 px-2.5 py-1 rounded-lg border border-red-200">
+                    CRITICAL PRIORITY
+                  </span>
+                </div>
+                <span className="text-xs font-mono font-bold text-slate-400">ID: #{report.id.slice(-6).toUpperCase()}</span>
+              </div>
+
+              {/* Title & Emergency Type */}
+              <div>
+                <span className="text-[10px] font-mono font-bold text-slate-400 uppercase block mb-1">Emergency Incident</span>
+                <h2 className="text-xl font-black text-slate-900">{report.title}</h2>
+              </div>
+
+              {/* Core Information Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 space-y-1">
+                  <span className="text-[10px] font-mono text-slate-500 uppercase font-bold block">Emergency Type</span>
+                  <strong className="text-slate-900 font-extrabold">{report.category || report.issueType || report.emergencyType || "Road Accident / Obstruction"}</strong>
+                </div>
+
+                <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 space-y-1">
+                  <span className="text-[10px] font-mono text-slate-500 uppercase font-bold block">Live GPS Location</span>
+                  <strong className="text-slate-900 font-extrabold flex items-center gap-1">
+                    <MapPin className="w-3.5 h-3.5 text-red-600 shrink-0" />
+                    <span className="truncate">{report.location || `${report.latitude?.toFixed(4)}° N, ${report.longitude?.toFixed(4)}° E`}</span>
+                  </strong>
+                </div>
+
+                <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 space-y-1">
+                  <span className="text-[10px] font-mono text-slate-500 uppercase font-bold block">Reported Timestamp</span>
+                  <strong className="text-slate-900 font-extrabold font-mono">
+                    {report.createdAt ? new Date(report.createdAt).toLocaleString() : "Just now"}
+                  </strong>
+                </div>
+
+                <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 space-y-1">
+                  <span className="text-[10px] font-mono text-slate-500 uppercase font-bold block">Current Status</span>
+                  <strong className="text-red-700 font-black uppercase">{report.status || "PENDING"}</strong>
+                </div>
+
+                <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 space-y-1">
+                  <span className="text-[10px] font-mono text-slate-500 uppercase font-bold block">Assigned Response Team</span>
+                  <strong className="text-blue-700 font-extrabold">{report.assignedTo || report.assignment?.teamName || "Awaiting Squad Assignment"}</strong>
+                </div>
+
+                <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 space-y-1">
+                  <span className="text-[10px] font-mono text-slate-500 uppercase font-bold block">Target Completion / SLA</span>
+                  <strong className="text-slate-900 font-extrabold">
+                    {getSlaStatus(report).dueFormatted} ({getSlaStatus(report).remainingText})
+                  </strong>
+                </div>
+              </div>
+
+              {/* Evidence Thumbnail (Actual or SOS Emergency Siren Placeholder) */}
+              <div className="space-y-1.5">
+                <span className="text-[10px] font-mono font-bold text-slate-600 uppercase block">
+                  SOS Evidence Asset
+                </span>
+                <div className="aspect-video max-h-72 rounded-2xl overflow-hidden border border-slate-200 bg-slate-900 relative shadow-inner">
+                  <img
+                    src={report.image || report.imageUrl || report.evidenceUrl || SOS_EMERGENCY_IMAGE}
+                    alt={report.title}
+                    className="w-full h-full object-cover"
+                    referrerPolicy="no-referrer"
+                  />
+                  <div className="absolute bottom-2.5 left-2.5 bg-red-600 text-white text-[10.5px] font-mono px-3 py-1 rounded-xl font-bold shadow-md flex items-center gap-1.5">
+                    <span>🚨</span>
+                    <span>Verified Emergency Signal Asset</span>
+                  </div>
+                </div>
+              </div>
+
+              {report.description && (
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 text-xs text-slate-700 space-y-1">
+                  <span className="text-[10px] font-mono text-slate-400 uppercase font-bold block">Citizen Details</span>
+                  <p className="italic leading-relaxed">"{report.description}"</p>
+                </div>
+              )}
+
+              {/* Action Toolbar */}
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+                {report.latitude && report.longitude && (
+                  <a
+                    href={`https://www.google.com/maps/search/?api=1&query=${report.latitude},${report.longitude}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-xs"
+                  >
+                    <MapPin className="w-3.5 h-3.5 text-red-400" />
+                    <span>Open Location</span>
+                  </a>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="overflow-y-auto flex-1 p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
           
           {/* Column 1: Core Details & Evidence Frame Gallery */}
           <div className="flex flex-col gap-4">
@@ -1187,6 +1295,7 @@ export default function ReportDetailsModal({
           </div>
 
         </div>
+        )}
 
         {/* MODAL: REJECT RESOLUTION PROMPT */}
         {rejectionModalOpen && (

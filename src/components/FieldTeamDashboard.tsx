@@ -5,8 +5,10 @@ import {
   FieldTaskStatus, 
   FieldVerificationResult, 
   FieldTeamMeta,
-  Priority
+  Priority,
+  isEmergencySosReport
 } from "../types";
+import { SOS_EMERGENCY_IMAGE } from "../utils/slaUtils";
 import { 
   DEFAULT_FIELD_TEAMS, 
   calculateHaversineDistance, 
@@ -1246,14 +1248,18 @@ export default function FieldTeamDashboard({
               {filteredTasks.map(task => {
                 const dist = calculateHaversineDistance(crewLocation.latitude, crewLocation.longitude, task.latitude, task.longitude);
                 const sla = calculateSlaStatus(task.priority, task.assignment?.assignedAt || task.createdAt);
-                const isCritical = task.priority === "Critical" || task.severity >= 80;
+                const isSos = isEmergencySosReport(task);
+                const isCritical = isSos || task.priority === "Critical" || task.severity >= 80;
                 const isRework = task.fieldStatus === "RETURN_TO_TEAM";
+                const taskImage = task.image || task.imageUrl || task.evidenceUrl || task.evidenceFrames?.[0] || (isSos ? SOS_EMERGENCY_IMAGE : null);
 
                 return (
                   <div
                     key={task.id}
-                    className={`bg-white rounded-2xl border transition-all flex flex-col justify-between shadow-2xs hover:shadow-sm ${
-                      isRework 
+                    className={`rounded-2xl border transition-all flex flex-col justify-between shadow-2xs hover:shadow-sm ${
+                      isSos 
+                        ? "bg-red-50/40 border-red-400 ring-2 ring-red-500/10" 
+                        : isRework 
                         ? "border-amber-400 bg-amber-50/20" 
                         : isCritical 
                         ? "border-rose-300" 
@@ -1263,11 +1269,18 @@ export default function FieldTeamDashboard({
                     <div className="p-5 flex flex-col gap-3">
                       {/* Card Header with Badges */}
                       <div className="flex items-center justify-between gap-2">
-                        <span className={`text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase ${
-                          isCritical ? "bg-rose-100 text-rose-700" : "bg-blue-100 text-blue-700"
-                        }`}>
-                          {task.priority || "Medium"}
-                        </span>
+                        {isSos ? (
+                          <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase bg-red-600 text-white flex items-center gap-1 shadow-xs">
+                            <span>🚨</span>
+                            <span>SOS TASK</span>
+                          </span>
+                        ) : (
+                          <span className={`text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase ${
+                            isCritical ? "bg-rose-100 text-rose-700" : "bg-blue-100 text-blue-700"
+                          }`}>
+                            {task.priority || "Medium"}
+                          </span>
+                        )}
                         <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border ${sla.statusColor}`}>
                           {sla.statusLabel}
                         </span>
@@ -1275,9 +1288,9 @@ export default function FieldTeamDashboard({
 
                       {/* Photo + Details Preview */}
                       <div className="flex items-start gap-3">
-                        {(task.image || task.evidenceUrl || task.evidenceFrames?.[0]) ? (
+                        {taskImage ? (
                           <img
-                            src={task.image || task.evidenceUrl || task.evidenceFrames?.[0] || ""}
+                            src={taskImage}
                             alt={task.title}
                             className="w-16 h-16 rounded-xl object-cover border border-slate-200 shrink-0"
                             referrerPolicy="no-referrer"
@@ -1301,7 +1314,7 @@ export default function FieldTeamDashboard({
                       <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-slate-500">
                         <span className="flex items-center gap-1">
                           <Navigation className="w-3 h-3 text-blue-500" />
-                          <span>{dist.formatted} away</span>
+                          <span>{isSos ? "Emergency Priority" : `${dist.formatted} away`}</span>
                         </span>
                         <span className="font-mono text-[11px] text-slate-400">
                           Due: {sla.deadline}

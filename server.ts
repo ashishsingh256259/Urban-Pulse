@@ -544,6 +544,59 @@ app.get("/api/health", (req: Request, res: Response) => {
   });
 });
 
+// ===================================================
+// CITIZEN PROFILE AVATAR STORAGE ENDPOINT
+// ===================================================
+const avatarsDir = path.join(process.cwd(), "public", "avatars");
+if (!fs.existsSync(avatarsDir)) {
+  fs.mkdirSync(avatarsDir, { recursive: true });
+}
+
+// Serve public avatars
+app.use("/avatars", express.static(avatarsDir));
+
+// Store Avatar endpoint for resilient cloud/local persistence
+app.post("/api/storage/avatar/:uid", (req: Request, res: Response) => {
+  try {
+    const rawUid = req.params.uid || "";
+    const cleanUid = rawUid.replace(/[^a-zA-Z0-9_-]/g, "_");
+    if (!cleanUid) {
+      return res.status(400).json({ success: false, error: "Missing user identifier." });
+    }
+
+    const { imageData } = req.body;
+    if (!imageData || typeof imageData !== "string") {
+      return res.status(400).json({ success: false, error: "No image payload provided." });
+    }
+
+    let buffer: Buffer;
+    let ext = "jpg";
+    const matches = imageData.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+    if (matches && matches.length === 3) {
+      const mime = matches[1];
+      if (mime.includes("png")) ext = "png";
+      else if (mime.includes("webp")) ext = "webp";
+      buffer = Buffer.from(matches[2], "base64");
+    } else {
+      buffer = Buffer.from(imageData, "base64");
+    }
+
+    if (buffer.length > 5 * 1024 * 1024) {
+      return res.status(400).json({ success: false, error: "Profile photo exceeds 5MB limit." });
+    }
+
+    const filename = `avatar_${cleanUid}.${ext}`;
+    const filePath = path.join(avatarsDir, filename);
+    fs.writeFileSync(filePath, buffer);
+
+    const photoURL = `/avatars/${filename}?t=${Date.now()}`;
+    return res.json({ success: true, photoURL });
+  } catch (err: any) {
+    console.error("Avatar storage error:", err);
+    return res.status(500).json({ success: false, error: "Unable to store avatar." });
+  }
+});
+
 // 1. GET ALL REPORTS
 app.get("/api/reports", async (req: Request, res: Response) => {
   try {

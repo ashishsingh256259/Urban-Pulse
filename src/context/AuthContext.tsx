@@ -25,6 +25,8 @@ export interface AuthContextType {
   signup: (email: string, pass: string, fullName: string, requestedRole?: UserRole) => Promise<UserProfile>;
   loginWithGoogle: (requestedRole?: UserRole) => Promise<UserProfile>;
   logout: () => Promise<void>;
+  updateUserProfile: (updates: Partial<UserProfile>) => Promise<UserProfile>;
+  refreshUserProfile: () => Promise<UserProfile | null>;
   authError: string | null;
   clearAuthError: () => void;
 }
@@ -586,6 +588,65 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  // Update User Profile with Firestore & Firebase Auth synchronization
+  const updateUserProfile = async (updates: Partial<UserProfile>): Promise<UserProfile> => {
+    const targetUid = userProfile?.uid || user?.uid || "";
+    if (!targetUid) {
+      throw new Error("No active user session found.");
+    }
+
+    const merged: UserProfile = {
+      ...(userProfile || {
+        uid: targetUid,
+        email: user?.email || "",
+        name: user?.displayName || "Citizen",
+        fullName: user?.displayName || "Citizen",
+        role: "citizen" as UserRole,
+        points: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }),
+      ...updates,
+      uid: targetUid,
+      updatedAt: new Date().toISOString()
+    };
+
+    // Synchronize displayName and photoURL to Firebase Auth if active
+    if (auth.currentUser) {
+      try {
+        const { updateProfile } = await import("firebase/auth");
+        await updateProfile(auth.currentUser, {
+          displayName: merged.displayName || merged.fullName || merged.name,
+          photoURL: merged.photoURL || undefined
+        });
+      } catch (authProfileErr) {
+        console.warn("Auth updateProfile notice:", authProfileErr);
+      }
+    }
+
+    // Persist to Firestore users/{uid}
+    await setUserProfile(merged);
+    setUserProfileState(merged);
+    try {
+      localStorage.setItem("urbanpulse_active_profile", JSON.stringify(merged));
+    } catch {}
+
+    return merged;
+  };
+
+  const refreshUserProfile = async (): Promise<UserProfile | null> => {
+    const targetUid = user?.uid || userProfile?.uid;
+    if (!targetUid) return null;
+    const fresh = await getUserProfile(targetUid);
+    if (fresh) {
+      setUserProfileState(fresh);
+      try {
+        localStorage.setItem("urbanpulse_active_profile", JSON.stringify(fresh));
+      } catch {}
+    }
+    return fresh;
+  };
+
   const role: UserRole = userProfile?.role || "citizen";
   const isAuthenticated = !!user;
 
@@ -601,6 +662,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         signup,
         loginWithGoogle,
         logout,
+        updateUserProfile,
+        refreshUserProfile,
         authError,
         clearAuthError,
       }}

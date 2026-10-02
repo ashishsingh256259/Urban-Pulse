@@ -442,18 +442,59 @@ export const bulkUpdateReportStatus = async (
 
   if (!reportIds || reportIds.length === 0) return;
 
-  const batch = writeBatch(db);
   const nowStr = new Date().toISOString();
 
-  for (const id of reportIds) {
-    const reportRef = doc(db, "reports", id);
-    batch.update(reportRef, {
-      status,
-      updatedAt: nowStr
-    });
+  // If in demo mode or db not connected, update DEMO_REPORTS in memory
+  if (!db || isDemoModeActive()) {
+    for (const id of reportIds) {
+      const rep = DEMO_REPORTS.find(r => r.id === id);
+      if (rep) {
+        rep.status = status as any;
+        rep.updatedAt = nowStr;
+        if (status === "REJECTED") {
+          rep.rejectedAt = nowStr;
+          rep.rejectedBy = "Municipal Administrator";
+          rep.rejectedByRole = "admin";
+          rep.rejectionReason = comment || "Duplicate report rejected and consolidated into primary incident";
+        }
+      }
+    }
+  } else {
+    try {
+      const batch = writeBatch(db);
+      for (const id of reportIds) {
+        const reportRef = doc(db, "reports", id);
+        const updatePayload: any = {
+          status,
+          updatedAt: nowStr
+        };
+        if (status === "REJECTED") {
+          updatePayload.rejectedAt = nowStr;
+          updatePayload.rejectedBy = "Municipal Administrator";
+          updatePayload.rejectedByRole = "admin";
+          updatePayload.rejectionReason = comment || "Duplicate report rejected and consolidated into primary incident";
+        }
+        batch.update(reportRef, updatePayload);
+      }
+      await batch.commit();
+    } catch (err) {
+      console.warn("Firestore bulk update notice, falling back to local dataset sync:", err);
+      // Fallback update to in-memory items
+      for (const id of reportIds) {
+        const rep = DEMO_REPORTS.find(r => r.id === id);
+        if (rep) {
+          rep.status = status as any;
+          rep.updatedAt = nowStr;
+          if (status === "REJECTED") {
+            rep.rejectedAt = nowStr;
+            rep.rejectedBy = "Municipal Administrator";
+            rep.rejectedByRole = "admin";
+            rep.rejectionReason = comment || "Duplicate report rejected and consolidated into primary incident";
+          }
+        }
+      }
+    }
   }
-
-  await batch.commit();
 
   Promise.all(
     reportIds.map(async (id) => {

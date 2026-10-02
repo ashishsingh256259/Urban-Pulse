@@ -4,10 +4,23 @@ export type UserRole = "citizen" | "admin" | "municipal" | "field_team";
 
 export interface User {
   id: string;
+  uid?: string;
   email: string;
   fullName: string;
+  name?: string;
+  displayName?: string;
   role: UserRole;
   phone?: string;
+  phoneNumber?: string;
+  photoURL?: string | null;
+  citizenId?: string;
+  dateOfBirth?: string;
+  gender?: string;
+  address?: CitizenAddress;
+  emergencyContact?: EmergencyContact;
+  notificationPreferences?: NotificationPreferences;
+  profileCompleted?: number;
+  status?: "ACTIVE" | "SUSPENDED" | "DEACTIVATED";
   active?: boolean;
   department?: string;
   teamId?: string;
@@ -22,14 +35,46 @@ export interface User {
   updatedAt?: string;
 }
 
+export interface CitizenAddress {
+  house?: string;
+  street?: string;
+  city?: string;
+  state?: string;
+  pinCode?: string;
+  landmark?: string;
+}
+
+export interface EmergencyContact {
+  name?: string;
+  relationship?: string;
+  phone?: string;
+}
+
+export interface NotificationPreferences {
+  reportStatusUpdates: boolean;
+  municipalUpdates: boolean;
+  emergencyAlerts: boolean;
+}
+
 export interface UserProfile {
   uid: string;
   id?: string;
   email: string;
   name: string;
   fullName?: string;
+  displayName?: string;
   role: UserRole;
   phone?: string;
+  phoneNumber?: string;
+  photoURL?: string | null;
+  citizenId?: string;
+  dateOfBirth?: string;
+  gender?: string;
+  address?: CitizenAddress;
+  emergencyContact?: EmergencyContact;
+  notificationPreferences?: NotificationPreferences;
+  profileCompleted?: number; // 0 - 100
+  status?: "ACTIVE" | "SUSPENDED" | "DEACTIVATED";
   active?: boolean;
   department?: string;
   teamId?: string;
@@ -518,12 +563,25 @@ export interface SafeRouteOption {
   roadQuality: "Optimal" | "Moderate" | "Caution Required";
   pathCoordinates: [number, number][];
   hazardsOnRoute: Array<{
+    id?: string;
     type: string;
     severity: number;
     lat: number;
     lng: number;
     description: string;
+    distanceAlongRouteMeters?: number;
+    distanceFromRouteMeters?: number;
+    priority?: string;
+    status?: string;
   }>;
+  safetyBreakdown?: {
+    hazardExposure: number;
+    roadRisk: number;
+    activeIncidents: number;
+    dataConfidence: "High" | "Medium" | "Unavailable";
+  };
+  summaryLabel?: "RECOMMENDED" | "FASTEST" | "ALTERNATIVE";
+  travelMode?: "car" | "bike" | "walk";
 }
 
 // --- REWARDS & LEADERBOARD TYPES ---

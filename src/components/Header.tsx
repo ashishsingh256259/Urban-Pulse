@@ -192,10 +192,22 @@ export default function Header({
           {currentUser ? (
             <div className="flex items-center gap-2">
               {/* User badge */}
-              <div className="text-right hidden sm:block">
-                <div className="text-xs font-bold text-slate-800 leading-3">{currentUser.fullName}</div>
-                <div className="text-[9px] font-medium text-slate-500">
-                  {currentUser.role === "admin" ? `🗺️ ${t('role.municipalDesc', 'Municipality Director')}` : `👷 ${t('role.citizenDesc', 'Citizen Responder')}`}
+              <div className="flex items-center gap-2">
+                {currentUser.photoURL ? (
+                  <img
+                    src={currentUser.photoURL}
+                    alt={currentUser.fullName}
+                    className="w-7 h-7 rounded-lg object-cover border border-slate-200"
+                    onError={(e) => {
+                      (e.target as HTMLElement).style.display = "none";
+                    }}
+                  />
+                ) : null}
+                <div className="text-right hidden sm:block">
+                  <div className="text-xs font-bold text-slate-800 leading-3">{currentUser.fullName}</div>
+                  <div className="text-[9px] font-medium text-slate-500">
+                    {currentUser.role === "admin" ? `🗺️ ${t('role.municipalDesc', 'Municipality Director')}` : `👷 ${t('role.citizenDesc', 'Citizen Responder')}`}
+                  </div>
                 </div>
               </div>
 

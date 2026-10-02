@@ -57,9 +57,12 @@ service cloud.firestore {
     }
 
     // User Profiles (citizen, municipal, field_team, admin)
+    // Enforces strict citizen privacy: a citizen can only read/write their own profile.
+    // Platform administrators and municipal officers can inspect citizen profiles for governance.
     match /users/{userId} {
-      allow read: if true;
-      allow create, update: if isAuthenticated() || true;
+      allow read: if isUser(userId) || isAdmin() || isMunicipal();
+      allow create: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow update: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
       allow delete: if isAdmin();
     }
 

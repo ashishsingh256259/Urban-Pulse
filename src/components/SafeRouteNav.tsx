@@ -1,104 +1,138 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import L from "../utils/initLeaflet";
 import { 
   Navigation, ShieldCheck, AlertTriangle, MapPin, 
-  Sparkles, Compass, Info, Route, Car, Bike, Footprints, Activity
+  Sparkles, Compass, Info, Route, Car, Bike, Footprints, Activity,
+  Search, X, Check, ArrowRight, RotateCcw, AlertOctagon, CheckCircle2,
+  ChevronRight, SlidersHorizontal, Home, GraduationCap, Briefcase, Clock,
+  Eye, CornerDownRight, Play, Square, RefreshCw, Crosshair
 } from "lucide-react";
 import { Report, SafeRouteOption } from "../types";
-import { calculateHaversineDistanceMeters } from "../services/spatialClustering";
 import { useLanguage } from "../context/LanguageContext";
+import { calculateHaversineDistanceMeters } from "../services/spatialClustering";
+import { 
+  searchLocationSuggestions, 
+  fetchOsrmRoutes, 
+  analyzeRoutesWithHazards, 
+  LocationSuggestion,
+  RoutePreferences,
+  DEFAULT_PREFERENCES,
+  CANONICAL_LANDMARKS
+} from "../services/safeRouteService";
 
 interface SafeRouteNavProps {
   reports: Report[];
 }
 
-function computeRouteRisk(routeCoordinates: [number, number][], reports: Report[]) {
-  const PROXIMITY_METERS = 60;
-  let totalRisk = 0;
-  const hazardsOnRoute: any[] = [];
-
-  reports.forEach(report => {
-    if (!report.latitude || !report.longitude) return;
-    if (report.status === "Resolved") return; 
-
-    let statusWeight = 1.0; 
-    if (report.status === "In Progress" || report.status === "Assigned") {
-      statusWeight = 0.5;
-    }
-
-    let priorityWeight = 1.0;
-    if (report.priority === "Critical") priorityWeight = 2.0;
-    else if (report.priority === "High") priorityWeight = 1.5;
-    else if (report.priority === "Low") priorityWeight = 0.5;
-
-    let severityWeight = (report.severity || 50) / 100;
-
-    let minDistance = Infinity;
-    // Step size 1 for maximum accuracy
-    for (let i = 0; i < routeCoordinates.length; i++) {
-      const coord = routeCoordinates[i];
-      const dist = calculateHaversineDistanceMeters(report.latitude, report.longitude, coord[0], coord[1]);
-      if (dist < minDistance) {
-        minDistance = dist;
-      }
-    }
-
-    if (minDistance <= PROXIMITY_METERS) {
-      const risk = statusWeight * priorityWeight * severityWeight;
-      totalRisk += risk;
-      hazardsOnRoute.push({
-        type: report.category,
-        severity: report.severity,
-        lat: report.latitude,
-        lng: report.longitude,
-        description: report.description || "Reported hazard",
-        source: report.source || "MANUAL_REPORT",
-        status: report.status,
-        priority: report.priority || "Medium"
-      });
-    }
-  });
-
-  return { totalRisk, hazardsOnRoute };
-}
+const STORAGE_KEY_RECENT = "UP_RECENT_DESTINATIONS";
 
 export default function SafeRouteNav({ reports }: SafeRouteNavProps) {
   const { t, isHindi } = useLanguage();
+
+  // Map references
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
-  const routeLayerRef = useRef<L.Polyline[]>([]);
+  const routeLayersRef = useRef<{ [routeId: string]: L.Polyline }>({});
   const originMarkerRef = useRef<L.Marker | null>(null);
   const destMarkerRef = useRef<L.Marker | null>(null);
-  const hazardMarkersRef = useRef<L.Marker[]>([]);
+  const hazardMarkersRef = useRef<{ [hazardKey: string]: L.Marker }>({});
+  const activeNavMarkerRef = useRef<L.Marker | null>(null);
+  const zoneLayersRef = useRef<L.Layer[]>([]);
+  const watchIdRef = useRef<number | null>(null);
+  const lastCenteredCoordRef = useRef<[number, number] | null>(null);
 
-  const [originStr, setOriginStr] = useState("");
+  // Origin & Destination State
+  const [originStr, setOriginStr] = useState("My Current Location");
   const [destinationStr, setDestinationStr] = useState("");
-  
   const [originCoord, setOriginCoord] = useState<[number, number] | null>(null);
   const [destCoord, setDestCoord] = useState<[number, number] | null>(null);
+  const [originAccuracy, setOriginAccuracy] = useState<number | null>(null);
+  const [gpsError, setGpsError] = useState<string | null>(null);
+  const [isLocatingGps, setIsLocatingGps] = useState(false);
 
+  // Live GPS Tracking State (Authoritative real-time coordinates)
+  const [currentGpsCoord, setCurrentGpsCoord] = useState<[number, number] | null>(null);
+  const [currentGpsAccuracy, setCurrentGpsAccuracy] = useState<number | null>(null);
+  const [gpsUnavailable, setGpsUnavailable] = useState(false);
+
+  // Authoritative user location (Live GPS when available, otherwise origin coordinate)
+  const authoritativeUserPos = useMemo<[number, number] | null>(() => {
+    return currentGpsCoord || originCoord;
+  }, [currentGpsCoord, originCoord]);
+
+  // Autocomplete Suggestions State
+  const [originSuggestions, setOriginSuggestions] = useState<LocationSuggestion[]>([]);
+  const [destSuggestions, setDestSuggestions] = useState<LocationSuggestion[]>([]);
+  const [showOriginDropdown, setShowOriginDropdown] = useState(false);
+  const [showDestDropdown, setShowDestDropdown] = useState(false);
+  const [isSearchingDest, setIsSearchingDest] = useState(false);
+
+  // Travel Mode & Route Preferences
   const [selectedTravelMode, setSelectedTravelMode] = useState<"car" | "bike" | "walk">("car");
-  const [calculating, setCalculating] = useState(false);
-  
+  const [preferences, setPreferences] = useState<RoutePreferences>(DEFAULT_PREFERENCES);
+  const [showPreferences, setShowPreferences] = useState(false);
+
+  // Computed Routes State
   const [computedRoutes, setComputedRoutes] = useState<SafeRouteOption[]>([]);
   const [selectedRouteId, setSelectedRouteId] = useState<string>("");
-  
-  const [statusMsg, setStatusMsg] = useState("IDLE");
-  const routeCache = useRef<Map<string, SafeRouteOption[]>>(new Map());
+  const [calculating, setCalculating] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (originCoord && destCoord && originStr && destinationStr) {
-      handleCalculateRoute();
-    }
-  }, [selectedTravelMode]);
+  // Navigation State (No fake simulated progress)
+  const [isNavigating, setIsNavigating] = useState(false);
+  const [showRerouteBanner, setShowRerouteBanner] = useState(false);
+  const [highlightedHazardId, setHighlightedHazardId] = useState<string | null>(null);
 
-  // Initialize Map
+  // Recent Searches State
+  const [recentDestinations, setRecentDestinations] = useState<Array<{ label: string; lat: number; lng: number }>>(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY_RECENT);
+      if (stored) return JSON.parse(stored);
+    } catch {}
+    return [
+      { label: "Knowledge Park III, Greater Noida", lat: 28.4608, lng: 77.4631 },
+      { label: "NIET Institute of Engineering, Greater Noida", lat: 28.4635, lng: 77.4885 },
+      { label: "Connaught Place (CP), New Delhi", lat: 28.6315, lng: 77.2167 }
+    ];
+  });
+
+  // Current Selected Route
+  const currentRoute = useMemo(() => {
+    return computedRoutes.find(r => r.id === selectedRouteId) || computedRoutes[0] || null;
+  }, [computedRoutes, selectedRouteId]);
+
+  // Alternative route for rerouting comparison
+  const alternativeRoute = useMemo(() => {
+    if (!currentRoute) return null;
+    return computedRoutes.find(r => r.id !== currentRoute.id) || null;
+  }, [computedRoutes, currentRoute]);
+
+  // Save to recent destinations
+  const saveRecentDestination = (label: string, lat: number, lng: number) => {
+    setRecentDestinations(prev => {
+      const filtered = prev.filter(p => p.label.toLowerCase() !== label.toLowerCase());
+      const updated = [{ label, lat, lng }, ...filtered].slice(0, 5);
+      try {
+        localStorage.setItem(STORAGE_KEY_RECENT, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+  };
+
+  const clearRecentHistory = () => {
+    try {
+      localStorage.removeItem(STORAGE_KEY_RECENT);
+    } catch {}
+    setRecentDestinations([]);
+  };
+
+  // 1. Initialize Map
   useEffect(() => {
     if (!mapContainerRef.current || mapInstanceRef.current) return;
 
     const map = L.map(mapContainerRef.current, {
-      center: [28.6139, 77.2090],
-      zoom: 12,
+      center: [28.4608, 77.4631], // Default: Knowledge Park III / NCR
+      zoom: 13,
       zoomControl: false
     });
 
@@ -110,6 +144,9 @@ export default function SafeRouteNav({ reports }: SafeRouteNavProps) {
     L.control.zoom({ position: "bottomright" }).addTo(map);
     mapInstanceRef.current = map;
 
+    // Trigger initial geolocation check
+    requestCurrentLocation();
+
     return () => {
       if (mapInstanceRef.current) {
         mapInstanceRef.current.remove();
@@ -118,585 +155,1348 @@ export default function SafeRouteNav({ reports }: SafeRouteNavProps) {
     };
   }, []);
 
-  const clearMapRoutes = () => {
-    const map = mapInstanceRef.current;
-    if (!map) return;
-    routeLayerRef.current.forEach(layer => {
-      if (layer && typeof map.removeLayer === "function") {
-        try {
-          if (map.hasLayer(layer)) {
-            map.removeLayer(layer);
-          }
-        } catch (e) {}
-      }
-    });
-    routeLayerRef.current = [];
-  };
+  // 2. Geolocation Request
+  const requestCurrentLocation = () => {
+    setIsLocatingGps(true);
+    setGpsError(null);
 
-  const clearHazardMarkers = () => {
-    const map = mapInstanceRef.current;
-    if (!map) return;
-    hazardMarkersRef.current.forEach(marker => {
-      if (marker && typeof map.removeLayer === "function") {
-        try {
-          if (map.hasLayer(marker)) {
-            map.removeLayer(marker);
-          }
-        } catch (e) {}
-      }
-    });
-    hazardMarkersRef.current = [];
-  };
-
-  const drawAllReportsMarkers = (selectedRouteObj?: SafeRouteOption) => {
-    const map = mapInstanceRef.current;
-    if (!map) return;
-    clearHazardMarkers();
-
-    const hazardIdsOnRoute = new Set((selectedRouteObj?.hazardsOnRoute || []).map((h: any) => h.id || `${h.lat},${h.lng}`));
-
-    reports.forEach(report => {
-      if (!report.latitude || !report.longitude) return;
-      if (report.status === "Resolved" || report.fieldStatus === "CLOSED") return;
-
-      const isSos = report.isSos || report.source === ("EMERGENCY_SOS" as any) || (report.title && report.title.toUpperCase().includes("SOS")) || (report.description && report.description.toUpperCase().includes("SOS"));
-      const isOnRoute = hazardIdsOnRoute.has(report.id) || hazardIdsOnRoute.has(`${report.latitude},${report.longitude}`);
-
-      let color = "#3B82F6";
-      if (isSos || report.priority === "Critical" || (report.severity || 0) >= 75) {
-        color = "#EF4444";
-      } else if (report.priority === "High" || (report.severity || 0) >= 45) {
-        color = "#F59E0B";
-      }
-
-      const size = isOnRoute ? 18 : 14;
-      const border = isOnRoute ? "3px solid #1D4ED8" : "2px solid white";
-      const shadow = isOnRoute ? "0 0 8px rgba(37,99,235,0.8)" : "0 0 4px rgba(0,0,0,0.5)";
-
-      const iconHtml = `<div style="background-color: ${color}; width: ${size}px; height: ${size}px; border-radius: 50%; border: ${border}; box-shadow: ${shadow};"></div>`;
-
-      const marker = L.marker([report.latitude, report.longitude], {
-        icon: L.divIcon({
-          className: "custom-div-icon",
-          html: iconHtml,
-          iconSize: [size, size],
-          iconAnchor: [size / 2, size / 2]
-        })
-      }).bindPopup(`
-        <div style="font-family: monospace; font-size: 11px; max-width: 200px;">
-          <strong>[${report.id}] ${report.title}</strong><br/>
-          Category: ${report.category}<br/>
-          Sev: ${report.severity} | Pri: ${report.priority || "Medium"}<br/>
-          Status: ${report.status || report.fieldStatus || "Active"}<br/>
-          Source: ${report.source || "MANUAL_REPORT"}
-          ${isOnRoute ? '<br/><span style="color: #2563EB; font-weight: bold;">(On Selected Route)</span>' : ''}
-        </div>
-      `).addTo(map);
-
-      hazardMarkersRef.current.push(marker);
-    });
-  };
-
-  useEffect(() => {
-    if (mapInstanceRef.current && reports.length > 0) {
-      if (computedRoutes.length === 0) {
-        drawAllReportsMarkers();
-      }
-    }
-  }, [reports, computedRoutes]);
-
-  const drawRoutesAndHazards = (routes: SafeRouteOption[], selectedId: string) => {
-    const map = mapInstanceRef.current;
-    if (!map) return;
-    
-    clearMapRoutes();
-
-    const unselected = routes.filter(r => r.id !== selectedId);
-    const selected = routes.find(r => r.id === selectedId);
-
-    const allDraw = [...unselected, selected].filter(Boolean) as SafeRouteOption[];
-
-    allDraw.forEach(rt => {
-      const isSelected = rt.id === selectedId;
-      const polyline = L.polyline(rt.pathCoordinates, {
-        color: isSelected ? (rt.id.includes("safe") ? "#10B981" : "#3B82F6") : "#94A3B8",
-        weight: isSelected ? 6 : 4,
-        opacity: isSelected ? 0.9 : 0.6,
-        dashArray: isSelected ? undefined : "5, 10"
-      }).addTo(map);
-      routeLayerRef.current.push(polyline);
-    });
-
-    if (selected) {
-      map.fitBounds(L.polyline(selected.pathCoordinates).getBounds(), { padding: [50, 50] });
-    }
-
-    drawAllReportsMarkers(selected);
-  };
-
-  useEffect(() => {
-    if (computedRoutes.length > 0 && selectedRouteId) {
-      drawRoutesAndHazards(computedRoutes, selectedRouteId);
-    }
-  }, [computedRoutes, selectedRouteId]);
-
-  const updateMarkers = (orig: [number, number] | null, dest: [number, number] | null) => {
-    const map = mapInstanceRef.current;
-    if (!map) return;
-
-    if (originMarkerRef.current) {
-      try {
-        if (map.hasLayer(originMarkerRef.current)) {
-          map.removeLayer(originMarkerRef.current);
-        }
-      } catch (e) {}
-      originMarkerRef.current = null;
-    }
-    if (destMarkerRef.current) {
-      try {
-        if (map.hasLayer(destMarkerRef.current)) {
-          map.removeLayer(destMarkerRef.current);
-        }
-      } catch (e) {}
-      destMarkerRef.current = null;
-    }
-
-    const createIcon = (color: string) => L.divIcon({
-      className: "custom-div-icon",
-      html: `<div style="background-color: ${color}; width: 16px; height: 16px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 5px rgba(0,0,0,0.3);"></div>`,
-      iconSize: [16, 16],
-      iconAnchor: [8, 8]
-    });
-
-    if (orig) {
-      originMarkerRef.current = L.marker(orig, { icon: createIcon("#10B981") }).addTo(map);
-      originMarkerRef.current.bindPopup("Origin");
-    }
-    if (dest) {
-      destMarkerRef.current = L.marker(dest, { icon: createIcon("#3B82F6") }).addTo(map);
-      destMarkerRef.current.bindPopup("Destination");
-    }
-
-    if (orig && !dest) map.setView(orig, 14);
-    if (dest && !orig) map.setView(dest, 14);
-  };
-
-  useEffect(() => {
-    updateMarkers(originCoord, destCoord);
-  }, [originCoord, destCoord]);
-
-  const useCurrentLocation = () => {
-    setStatusMsg("LOCATING");
     if (!navigator.geolocation) {
-      setStatusMsg("ERROR: Geolocation not supported");
-      alert("Location permission is required to calculate a route from your current location.");
+      setGpsError("Geolocation is not supported by your browser.");
+      setIsLocatingGps(false);
+      // Fallback to Knowledge Park / Delhi reference point without pretending it's GPS
+      setOriginStr("Pari Chowk, Greater Noida (Manual Selection)");
+      setOriginCoord([28.4764, 77.5037]);
       return;
     }
+
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        setOriginCoord([pos.coords.latitude, pos.coords.longitude]);
-        setOriginStr("My Current Location");
-        setStatusMsg("LOCATION_READY");
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        const acc = pos.coords.accuracy ? Math.round(pos.coords.accuracy) : 15;
+        setOriginCoord([lat, lng]);
+        setOriginAccuracy(acc);
+        setOriginStr("Current Location");
+        setIsLocatingGps(false);
+        setGpsError(null);
+
+        if (mapInstanceRef.current && !destCoord) {
+          mapInstanceRef.current.setView([lat, lng], 14);
+        }
       },
       (err) => {
-        setStatusMsg("ERROR: Location denied");
-        alert("Location permission is required to calculate a route from your current location.");
-      }
+        setIsLocatingGps(false);
+        setGpsError("Location permission denied. Please enter your starting point manually above.");
+        // Set an explicit starting fallback landmark so the user is never stuck
+        if (!originCoord) {
+          setOriginStr("Pari Chowk, Greater Noida");
+          setOriginCoord([28.4764, 77.5037]);
+        }
+      },
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
     );
   };
 
-  const geocode = async (query: string): Promise<[number, number] | null> => {
-    try {
-      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`, {
-        headers: { "User-Agent": "UrbanPulse/1.0" }
-      });
-      const data = await res.json();
-      if (data && data.length > 0) {
-        return [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+  // 3. Autocomplete Search Handler for Destination
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      if (destinationStr.trim().length >= 2) {
+        setIsSearchingDest(true);
+        const results = await searchLocationSuggestions(destinationStr, reports);
+        setDestSuggestions(results);
+        setIsSearchingDest(false);
+      } else {
+        setDestSuggestions([]);
       }
-    } catch (e) {
-      console.error(e);
-    }
-    return null;
+    }, 280);
+
+    return () => clearTimeout(timer);
+  }, [destinationStr, reports]);
+
+  // Autocomplete Search Handler for Origin (when manual origin is typed)
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      if (originStr.trim().length >= 2 && originStr !== "Current Location") {
+        const results = await searchLocationSuggestions(originStr, reports);
+        setOriginSuggestions(results);
+      } else {
+        setOriginSuggestions([]);
+      }
+    }, 280);
+
+    return () => clearTimeout(timer);
+  }, [originStr, reports]);
+
+  // Handle selecting a destination suggestion
+  const handleSelectDestination = (sug: LocationSuggestion) => {
+    setDestinationStr(sug.label);
+    setDestCoord([sug.lat, sug.lng]);
+    setShowDestDropdown(false);
+    saveRecentDestination(sug.label, sug.lat, sug.lng);
   };
 
+  // Handle selecting an origin suggestion
+  const handleSelectOrigin = (sug: LocationSuggestion) => {
+    setOriginStr(sug.label);
+    setOriginCoord([sug.lat, sug.lng]);
+    setOriginAccuracy(null);
+    setShowOriginDropdown(false);
+  };
+
+  // Quick Select Saved Place
+  const handleQuickSelectPlace = (place: { label: string; lat: number; lng: number }) => {
+    setDestinationStr(place.label);
+    setDestCoord([place.lat, place.lng]);
+    saveRecentDestination(place.label, place.lat, place.lng);
+  };
+
+  // 4. Calculate Route Function
   const handleCalculateRoute = async () => {
-    if (!originStr || !destinationStr) return;
+    if (!destinationStr.trim()) {
+      setErrorMessage("Please enter a destination to calculate a safe route.");
+      return;
+    }
+
     setCalculating(true);
-    setStatusMsg("CALCULATING_ROUTE");
-    clearMapRoutes();
+    setErrorMessage(null);
+    setIsNavigating(false);
+    setShowRerouteBanner(false);
 
+    // Resolve Origin coordinates if needed
     let orig = originCoord;
-    if (!orig || originStr !== "My Current Location") {
-      orig = await geocode(originStr);
-      if (orig) setOriginCoord(orig);
-    }
-
-    let dest = destCoord;
-    dest = await geocode(destinationStr);
-    if (dest) setDestCoord(dest);
-
-    if (!orig || !dest) {
-      setStatusMsg("ERROR: Invalid destination or origin");
-      setCalculating(false);
-      return;
-    }
-
-    const cacheKey = `${orig[0].toFixed(4)},${orig[1].toFixed(4)}-${dest[0].toFixed(4)},${dest[1].toFixed(4)}-${selectedTravelMode}`;
-    if (routeCache.current.has(cacheKey)) {
-      const cached = routeCache.current.get(cacheKey)!;
-      setComputedRoutes(cached);
-      setSelectedRouteId(cached[0]?.id || "");
-      setStatusMsg("ROUTE_READY");
-      setCalculating(false);
-      return;
-    }
-
-    try {
-      const profileMap: Record<"car" | "bike" | "walk", string> = {
-        car: "driving",
-        bike: "bike",
-        walk: "foot"
-      };
-      const osrmMode = profileMap[selectedTravelMode];
-      const url = `https://router.project-osrm.org/route/v1/${osrmMode}/${orig[1]},${orig[0]};${dest[1]},${dest[0]}?overview=full&geometries=geojson&alternatives=true`;
-      
-      const res = await fetch(url);
-      const data = await res.json();
-
-      if (data.code !== "Ok" || !data.routes || data.routes.length === 0) {
-        const modeLabel = selectedTravelMode === "bike" ? "Bike" : selectedTravelMode === "walk" ? "Walking" : "Car";
-        setStatusMsg(`${modeLabel} routing is currently unavailable.`);
-        setComputedRoutes([]);
+    if (!orig) {
+      if (originStr === "Current Location") {
+        requestCurrentLocation();
         setCalculating(false);
-        clearMapRoutes();
         return;
       }
-
-      const analyzedRoutes = data.routes.map((r: any, idx: number) => {
-        const coords: [number, number][] = r.geometry.coordinates.map((c: any) => [c[1], c[0]]);
-        
-        // Hazard awareness analysis based on actual reports
-        const { totalRisk, hazardsOnRoute } = computeRouteRisk(coords, reports);
-        
-        // Convert risk to a 0-100 safety score (Deterministic)
-        const safetyScore = Math.max(0, Math.round(100 - (totalRisk * 15)));
-        
-        const roadQual = safetyScore >= 80 ? "Optimal" : safetyScore >= 50 ? "Moderate" : "Caution Required";
-
-        return {
-          _rawRisk: totalRisk,
-          id: `alt_route_${idx}`,
-          name: `Route Option ${idx + 1}`,
-          distanceKm: parseFloat((r.distance / 1000).toFixed(1)),
-          durationMinutes: Math.round(r.duration / 60),
-          safetyScore,
-          hazardCountAvoided: 0, 
-          roadQuality: roadQual,
-          pathCoordinates: coords,
-          hazardsOnRoute
-        };
-      });
-
-      analyzedRoutes.sort((a: any, b: any) => {
-        const safetyDiff = b.safetyScore - a.safetyScore;
-        const durDiff = (a.durationMinutes - b.durationMinutes) * 0.5; 
-        return safetyDiff + durDiff;
-      });
-
-      if (analyzedRoutes.length > 0) {
-        analyzedRoutes[0].id = "safe_route_0";
-        analyzedRoutes[0].name = "Recommended Route";
-        
-        const worstRoute = [...analyzedRoutes].sort((a: any, b: any) => b.hazardsOnRoute.length - a.hazardsOnRoute.length)[0];
-        if (worstRoute && worstRoute.id !== analyzedRoutes[0].id) {
-          analyzedRoutes[0].hazardCountAvoided = Math.max(0, worstRoute.hazardsOnRoute.length - analyzedRoutes[0].hazardsOnRoute.length);
-        }
+      const resolvedOrigin = await searchLocationSuggestions(originStr, reports);
+      if (resolvedOrigin.length > 0) {
+        orig = [resolvedOrigin[0].lat, resolvedOrigin[0].lng];
+        setOriginCoord(orig);
+      } else {
+        setErrorMessage("Starting location not found. Please select a valid origin suggestion.");
+        setCalculating(false);
+        return;
       }
-
-      routeCache.current.set(cacheKey, analyzedRoutes);
-      setComputedRoutes(analyzedRoutes);
-      setSelectedRouteId(analyzedRoutes[0].id);
-      setStatusMsg("ROUTE_READY");
-    } catch (err) {
-      setStatusMsg("ERROR: Routing API failure");
-      console.error(err);
-      clearMapRoutes();
     }
-    setCalculating(false);
+
+    // Resolve Destination coordinates if needed
+    let dest = destCoord;
+    if (!dest) {
+      const resolvedDest = await searchLocationSuggestions(destinationStr, reports);
+      if (resolvedDest.length > 0) {
+        dest = [resolvedDest[0].lat, resolvedDest[0].lng];
+        setDestCoord(dest);
+        setDestinationStr(resolvedDest[0].label);
+        saveRecentDestination(resolvedDest[0].label, dest[0], dest[1]);
+      } else {
+        setErrorMessage("Destination location not found. Try selecting one of the suggested places.");
+        setCalculating(false);
+        return;
+      }
+    }
+
+    try {
+      // 1. Query the existing OSRM routing provider with real coordinates and travel mode
+      const rawRoutes = await fetchOsrmRoutes(orig, dest, selectedTravelMode);
+
+      // 2. Perform hazard analysis against actual UrbanPulse reports
+      const analyzedRoutes = analyzeRoutesWithHazards(
+        rawRoutes, 
+        reports, 
+        selectedTravelMode, 
+        preferences
+      );
+
+      setComputedRoutes(analyzedRoutes);
+      setSelectedRouteId(analyzedRoutes[0]?.id || "");
+
+      // If top route has high severity hazards, prepare reroute suggestion
+      if (analyzedRoutes[0]?.hazardsOnRoute.length > 0 && analyzedRoutes.length > 1) {
+        setShowRerouteBanner(true);
+      }
+    } catch (err: any) {
+      console.error("Routing error:", err);
+      setErrorMessage(err.message || "Unable to calculate route. Please try again or select another destination.");
+      setComputedRoutes([]);
+    } finally {
+      setCalculating(false);
+    }
   };
 
-  const currentSelectedRoute = computedRoutes.find(r => r.id === selectedRouteId) || computedRoutes[0];
-  
-  // Calculate Live Hazard Index for current map area (rough estimation based on all reports)
-  const activeReportsCount = reports.filter(r => r.status !== "Resolved" && r.latitude && r.longitude).length;
+  // Recalculate routes when travel mode or preferences change
+  useEffect(() => {
+    if (originCoord && destCoord && destinationStr) {
+      handleCalculateRoute();
+    }
+  }, [selectedTravelMode, preferences.preferFastest, preferences.preferSafer, preferences.avoidHighRisk]);
 
-  return (
-    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700 text-left">
-      <div className="bg-gradient-to-r from-[#EFF6FF] to-[#FFFFFF] border border-[#DBEAFE] rounded-2xl p-5 md:p-6 text-[#172033] shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div className="flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-xl bg-[#EFF6FF] border border-[#DBEAFE] flex items-center justify-center text-[#2563EB] shrink-0 shadow-2xs">
-            <Compass className="w-6 h-6" />
+  // 5. Draw Markers (Authoritative User Location & Destination)
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    const createPin = (color: string, label: string, isPulsing: boolean = false) => L.divIcon({
+      className: "custom-pin",
+      html: `
+        <div style="position: relative; display: flex; flex-direction: column; align-items: center;">
+          ${isPulsing ? `
+            <div style="position: absolute; top: -6px; width: 34px; height: 34px; background: rgba(37,99,235,0.35); border-radius: 50%; animation: ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;"></div>
+          ` : ''}
+          <div style="background-color: ${color}; width: 22px; height: 22px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); border: 2.5px solid white; box-shadow: 0 3px 8px rgba(0,0,0,0.35); display: flex; align-items: center; justify-content: center; z-index: 2;">
+            <div style="width: 6px; height: 6px; background: white; border-radius: 50%;"></div>
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-base font-black tracking-tight text-[#172033] uppercase">
-                {t("saferoute.title", "SAFE ROUTE NAVIGATOR")}
-              </h1>
-              <span className="px-2 py-0.5 bg-[#EFF6FF] text-[#2563EB] border border-[#DBEAFE] rounded text-[9.5px] font-mono font-bold uppercase tracking-wider">
-                {t("saferoute.badge", "Hazard-Aware Routing Engine")}
-              </span>
-            </div>
-            <p className="text-xs text-[#64748B] mt-0.5">
-              {t("saferoute.subtitle", "Dynamically evaluates road surface degradation, active potholes, and lighting outages to calculate safer commuter corridors.")}
-            </p>
-          </div>
-        </div>
-        <div className="flex flex-col items-end gap-1.5">
-          <div className="flex items-center gap-2 text-xs font-mono bg-white px-3.5 py-2 rounded-xl border border-[#E2E8F0] shadow-2xs">
-            <Activity className="w-4 h-4 text-[#16A34A]" />
-            <span className="text-[#64748B]">{t("saferoute.status", "Status:")}</span>
-            <span className="text-[#16A34A] font-bold">
-              {statusMsg === "IDLE" ? (isHindi ? "सक्रिय" : "IDLE") : statusMsg === "ROUTE_READY" ? (isHindi ? "मार्ग तैयार" : "ROUTE_READY") : statusMsg}
-            </span>
-          </div>
-          <span className="text-[9px] text-[#94A3B8] font-mono">
-            {activeReportsCount > 0 
-              ? `${activeReportsCount} ${t("saferoute.liveHazardsTracked", "Live Hazards Tracked Globally")}` 
-              : t("saferoute.noHazards", "No active UrbanPulse hazards detected.")}
+          <span style="background: white; color: #1E293B; font-family: sans-serif; font-size: 10px; font-weight: 800; padding: 1px 5px; border-radius: 4px; border: 1px solid #CBD5E1; margin-top: 3px; box-shadow: 0 1px 3px rgba(0,0,0,0.15); white-space: nowrap; z-index: 2;">
+            ${label}
           </span>
         </div>
+      `,
+      iconSize: [30, 42],
+      iconAnchor: [15, 26]
+    });
+
+    // Authoritative User GPS marker (🔵 User / Current GPS Position)
+    if (authoritativeUserPos) {
+      const userLabel = isNavigating ? "LIVE GPS" : "START / YOU";
+      if (!originMarkerRef.current) {
+        originMarkerRef.current = L.marker(authoritativeUserPos, { 
+          icon: createPin("#2563EB", userLabel, isNavigating) 
+        }).addTo(map);
+      } else {
+        originMarkerRef.current.setLatLng(authoritativeUserPos);
+        originMarkerRef.current.setIcon(createPin("#2563EB", userLabel, isNavigating));
+      }
+    } else if (originMarkerRef.current) {
+      map.removeLayer(originMarkerRef.current);
+      originMarkerRef.current = null;
+    }
+
+    // Destination Marker (🔴 Destination)
+    if (destCoord) {
+      if (!destMarkerRef.current) {
+        destMarkerRef.current = L.marker(destCoord, { 
+          icon: createPin("#DC2626", "DESTINATION") 
+        }).addTo(map);
+      } else {
+        destMarkerRef.current.setLatLng(destCoord);
+      }
+    } else if (destMarkerRef.current) {
+      map.removeLayer(destMarkerRef.current);
+      destMarkerRef.current = null;
+    }
+  }, [authoritativeUserPos, destCoord, isNavigating]);
+
+  // 6. Draw Routes & Hazard Markers on Map
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    // Clear previous route polylines
+    Object.values(routeLayersRef.current).forEach(layer => {
+      if (map.hasLayer(layer)) {
+        map.removeLayer(layer);
+      }
+    });
+    routeLayersRef.current = {};
+
+    // Clear previous hazard markers
+    Object.values(hazardMarkersRef.current).forEach(marker => {
+      if (map.hasLayer(marker)) {
+        map.removeLayer(marker);
+      }
+    });
+    hazardMarkersRef.current = {};
+
+    // Clear previous risk zones and safe segments
+    zoneLayersRef.current.forEach(layer => {
+      if (map.hasLayer(layer)) {
+        map.removeLayer(layer);
+      }
+    });
+    zoneLayersRef.current = [];
+
+    if (computedRoutes.length === 0) return;
+
+    // Draw unselected routes first (background)
+    computedRoutes.forEach(route => {
+      const isSelected = route.id === selectedRouteId;
+      if (!isSelected) {
+        const polyline = L.polyline(route.pathCoordinates, {
+          color: "#94A3B8",
+          weight: 4,
+          opacity: 0.55,
+          dashArray: "6, 8"
+        }).addTo(map);
+        routeLayersRef.current[route.id] = polyline;
+      }
+    });
+
+    // Draw selected route (prominent foreground)
+    const selected = computedRoutes.find(r => r.id === selectedRouteId) || computedRoutes[0];
+    if (selected) {
+      // 1. Draw 🟢 Safe route segments underlay (segments with no close hazards)
+      const safePolyline = L.polyline(selected.pathCoordinates, {
+        color: "#10B981", // 🟢 Safe route segments
+        weight: 8,
+        opacity: 0.4
+      }).addTo(map);
+      zoneLayersRef.current.push(safePolyline);
+
+      // 2. Draw 🟦 Selected route
+      const polyline = L.polyline(selected.pathCoordinates, {
+        color: "#2563EB", // 🟦 Selected route
+        weight: 5,
+        opacity: 0.95
+      }).addTo(map);
+      routeLayersRef.current[selected.id] = polyline;
+
+      // Fit map bounds to show full route comfortably
+      try {
+        map.fitBounds(polyline.getBounds(), { padding: [50, 50] });
+      } catch {}
+
+      // 3. Draw 🟠 High-risk zones & ⚠ Hazard markers along selected route
+      selected.hazardsOnRoute.forEach(hazard => {
+        const isCritical = (hazard.severity || 0) >= 80 || (hazard.type || "").toUpperCase().includes("SOS");
+        const isHigh = (hazard.severity || 0) >= 50;
+        const color = isCritical ? "#DC2626" : isHigh ? "#EA580C" : "#D97706";
+
+        // Draw 🟠 High-risk buffer zone circle around severe hazards
+        if (isHigh || isCritical) {
+          const riskCircle = L.circle([hazard.lat, hazard.lng], {
+            radius: 80,
+            color: "#EA580C",
+            fillColor: "#F97316",
+            fillOpacity: 0.25,
+            weight: 1.5,
+            dashArray: "4, 4"
+          }).addTo(map);
+          zoneLayersRef.current.push(riskCircle);
+        }
+
+        const hazardIcon = L.divIcon({
+          className: "custom-hazard-marker",
+          html: `
+            <div style="background-color: ${color}; width: 22px; height: 22px; border-radius: 50%; border: 2.5px solid white; box-shadow: 0 0 8px ${color}88, 0 2px 4px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; color: white; font-weight: 900; font-size: 11px;">
+              ⚠
+            </div>
+          `,
+          iconSize: [22, 22],
+          iconAnchor: [11, 11]
+        });
+
+        const marker = L.marker([hazard.lat, hazard.lng], { icon: hazardIcon })
+          .bindPopup(`
+            <div style="font-family: sans-serif; font-size: 11px; max-width: 220px; color: #1E293B; line-height: 1.4;">
+              <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 4px;">
+                <span style="background: ${color}20; color: ${color}; font-weight: 800; font-size: 9px; padding: 1px 5px; border-radius: 4px; text-transform: uppercase;">
+                  ⚠ ${hazard.type}
+                </span>
+                <span style="font-size: 9px; color: #64748B;">• Severity ${hazard.severity}/100</span>
+              </div>
+              <strong style="font-size: 12px; display: block; margin-bottom: 2px;">${hazard.description}</strong>
+              <div style="color: #64748B; font-size: 10px; margin-top: 4px; border-top: 1px solid #E2E8F0; padding-top: 4px;">
+                <span>Distance ahead: <strong>${((hazard.distanceAlongRouteMeters || 0) / 1000).toFixed(1)} km</strong></span><br/>
+                <span>Offset from route: <strong>${hazard.distanceFromRouteMeters || 0} m</strong></span><br/>
+                <span>Status: <strong>${hazard.status || "Pending"}</strong></span>
+              </div>
+            </div>
+          `)
+          .addTo(map);
+
+        const key = `${hazard.lat}_${hazard.lng}`;
+        hazardMarkersRef.current[key] = marker;
+      });
+    }
+  }, [computedRoutes, selectedRouteId]);
+
+  // 7. Live GPS Navigation Engine (Strictly authoritative, real-time device coordinates)
+  const handleStartNavigation = () => {
+    if (!currentRoute) return;
+
+    setIsNavigating(true);
+    setGpsUnavailable(false);
+
+    if (!navigator.geolocation) {
+      setGpsUnavailable(true);
+      return;
+    }
+
+    setIsLocatingGps(true);
+
+    // 1. Request current geolocation immediately
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        const acc = pos.coords.accuracy ? Math.round(pos.coords.accuracy) : null;
+        setCurrentGpsCoord([lat, lng]);
+        setCurrentGpsAccuracy(acc);
+        setIsLocatingGps(false);
+        setGpsUnavailable(false);
+
+        // Center map once on starting GPS position
+        if (mapInstanceRef.current) {
+          mapInstanceRef.current.setView([lat, lng], 15, { animate: true });
+          lastCenteredCoordRef.current = [lat, lng];
+        }
+      },
+      (err) => {
+        console.warn("GPS acquire notice:", err);
+        setIsLocatingGps(false);
+        if (!currentGpsCoord && !originCoord) {
+          setGpsUnavailable(true);
+        }
+      },
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 10000 }
+    );
+
+    // 2. Clear existing watch if active
+    if (watchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+
+    // 3. Start live watchPosition
+    try {
+      watchIdRef.current = navigator.geolocation.watchPosition(
+        (pos) => {
+          const lat = pos.coords.latitude;
+          const lng = pos.coords.longitude;
+          const acc = pos.coords.accuracy ? Math.round(pos.coords.accuracy) : null;
+          setCurrentGpsCoord([lat, lng]);
+          setCurrentGpsAccuracy(acc);
+          setGpsUnavailable(false);
+
+          // Auto-center ONLY when user has physically moved significantly (> 100m)
+          if (mapInstanceRef.current) {
+            const last = lastCenteredCoordRef.current;
+            if (!last) {
+              mapInstanceRef.current.setView([lat, lng], 15, { animate: true });
+              lastCenteredCoordRef.current = [lat, lng];
+            } else {
+              const movedDist = calculateHaversineDistanceMeters(last[0], last[1], lat, lng);
+              if (movedDist > 100) {
+                mapInstanceRef.current.setView([lat, lng], 15, { animate: true });
+                lastCenteredCoordRef.current = [lat, lng];
+              }
+            }
+          }
+        },
+        (err) => {
+          console.warn("Live watchPosition error:", err);
+          setGpsUnavailable(true);
+        },
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+      );
+    } catch (e) {
+      console.error("Failed to start watchPosition:", e);
+      setGpsUnavailable(true);
+    }
+  };
+
+  const handleStopNavigation = () => {
+    if (watchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+    setIsNavigating(false);
+    setIsLocatingGps(false);
+  };
+
+  // Explicit user map centering on their authoritative GPS position
+  const handleCenterOnMe = () => {
+    if (mapInstanceRef.current && authoritativeUserPos) {
+      mapInstanceRef.current.setView(authoritativeUserPos, 16, { animate: true });
+      lastCenteredCoordRef.current = authoritativeUserPos;
+    }
+  };
+
+  // Clean up geolocation watch on unmount
+  useEffect(() => {
+    return () => {
+      if (watchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+        watchIdRef.current = null;
+      }
+    };
+  }, []);
+
+  // Compute Route Progress from Real User Coordinates (No artificial timer decrements)
+  const navProgress = useMemo(() => {
+    if (!currentRoute || currentRoute.pathCoordinates.length === 0 || !authoritativeUserPos) {
+      return {
+        nearestStepIndex: 0,
+        currentStep: 1,
+        totalSteps: currentRoute?.pathCoordinates.length || 0,
+        remainingKm: currentRoute?.distanceKm || 0,
+        remainingMinutes: currentRoute?.durationMinutes || 0
+      };
+    }
+
+    const coords = currentRoute.pathCoordinates;
+    const [userLat, userLng] = authoritativeUserPos;
+
+    let nearestIndex = 0;
+    let minDistanceMeters = Infinity;
+
+    for (let i = 0; i < coords.length; i++) {
+      const dist = calculateHaversineDistanceMeters(userLat, userLng, coords[i][0], coords[i][1]);
+      if (dist < minDistanceMeters) {
+        minDistanceMeters = dist;
+        nearestIndex = i;
+      }
+    }
+
+    // Calculate real remaining distance along path from nearest route step to destination
+    let remainingMeters = minDistanceMeters;
+    for (let i = nearestIndex; i < coords.length - 1; i++) {
+      remainingMeters += calculateHaversineDistanceMeters(
+        coords[i][0], coords[i][1],
+        coords[i + 1][0], coords[i + 1][1]
+      );
+    }
+
+    const remainingKm = Number((remainingMeters / 1000).toFixed(1));
+    const remainingMinutes = currentRoute.distanceKm > 0
+      ? Math.max(1, Math.round((remainingMeters / (currentRoute.distanceKm * 1000)) * currentRoute.durationMinutes))
+      : currentRoute.durationMinutes;
+
+    return {
+      nearestStepIndex: nearestIndex,
+      currentStep: nearestIndex + 1,
+      totalSteps: coords.length,
+      remainingKm,
+      remainingMinutes
+    };
+  }, [currentRoute, authoritativeUserPos]);
+
+  // Compute Nearest Active Hazard from Authoritative Real GPS Coordinates (Not simulated)
+  const nextHazardInfo = useMemo(() => {
+    if (!currentRoute || currentRoute.hazardsOnRoute.length === 0 || !authoritativeUserPos) return null;
+
+    const [uLat, uLng] = authoritativeUserPos;
+    let closestHazard = currentRoute.hazardsOnRoute[0];
+    let minHazardMeters = calculateHaversineDistanceMeters(uLat, uLng, closestHazard.lat, closestHazard.lng);
+
+    for (let i = 1; i < currentRoute.hazardsOnRoute.length; i++) {
+      const h = currentRoute.hazardsOnRoute[i];
+      const dist = calculateHaversineDistanceMeters(uLat, uLng, h.lat, h.lng);
+      if (dist < minHazardMeters) {
+        minHazardMeters = dist;
+        closestHazard = h;
+      }
+    }
+
+    return {
+      hazard: closestHazard,
+      distanceKm: (minHazardMeters / 1000).toFixed(1),
+      distanceMeters: Math.round(minHazardMeters)
+    };
+  }, [currentRoute, authoritativeUserPos]);
+
+  // Focus on specific hazard from the hazard list
+  const handleFocusHazard = (hazard: SafeRouteOption["hazardsOnRoute"][0]) => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    setHighlightedHazardId(hazard.id || `${hazard.lat}_${hazard.lng}`);
+
+    map.setView([hazard.lat, hazard.lng], 16, { animate: true });
+    const key = `${hazard.lat}_${hazard.lng}`;
+    const marker = hazardMarkersRef.current[key];
+    if (marker) {
+      marker.openPopup();
+    }
+  };
+
+  // Switch to alternative route when rerouting is accepted
+  const handleApplyReroute = () => {
+    if (alternativeRoute) {
+      setSelectedRouteId(alternativeRoute.id);
+      setShowRerouteBanner(false);
+    }
+  };
+
+  // Backward-compatible reference for next hazard
+  const nextHazardAhead = useMemo(() => {
+    return nextHazardInfo?.hazard || null;
+  }, [nextHazardInfo]);
+
+  return (
+    <div className="space-y-5 animate-in fade-in duration-500 text-left">
+      
+      {/* Top Engine Header */}
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-900/60 rounded-3xl p-5 md:p-6 text-white shadow-lg relative overflow-hidden">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center text-indigo-400 shrink-0 shadow-inner">
+              <Compass className="w-6 h-6 animate-pulse" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h1 className="text-xl md:text-2xl font-black tracking-tight font-sans">
+                  SAFE ROUTE NAVIGATION
+                </h1>
+                <span className="px-2.5 py-0.5 bg-indigo-500/20 text-indigo-300 border border-indigo-400/30 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider">
+                  Hazard-Aware
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 mt-1 max-w-xl leading-relaxed">
+                Evaluates active road craters, structural fissures, and verified civic hazards from UrbanPulse live feeds to compute hazard-minimized commuter corridors.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2.5 shrink-0 self-start lg:self-auto">
+            <button
+              onClick={() => setShowPreferences(!showPreferences)}
+              className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 border border-white/10 cursor-pointer"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-300" />
+              <span>Preferences</span>
+            </button>
+            <button
+              onClick={requestCurrentLocation}
+              disabled={isLocatingGps}
+              className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
+            >
+              <Compass className={`w-3.5 h-3.5 ${isLocatingGps ? 'animate-spin' : ''}`} />
+              <span>{isLocatingGps ? "Acquiring GPS..." : "GPS Sync"}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Route Preferences Dropdown Panel */}
+        {showPreferences && (
+          <div className="mt-4 pt-4 border-t border-indigo-900/60 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs animate-fadeIn">
+            <label className="flex items-center gap-2 cursor-pointer bg-white/5 p-2 rounded-xl border border-white/5 hover:bg-white/10 transition">
+              <input
+                type="checkbox"
+                checked={preferences.avoidHighRisk}
+                onChange={e => setPreferences(p => ({ ...p, avoidHighRisk: e.target.checked }))}
+                className="rounded accent-indigo-500"
+              />
+              <span>Avoid high-risk roads</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer bg-white/5 p-2 rounded-xl border border-white/5 hover:bg-white/10 transition">
+              <input
+                type="checkbox"
+                checked={preferences.avoidIncidents}
+                onChange={e => setPreferences(p => ({ ...p, avoidIncidents: e.target.checked }))}
+                className="rounded accent-indigo-500"
+              />
+              <span>Avoid active incidents</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer bg-white/5 p-2 rounded-xl border border-white/5 hover:bg-white/10 transition">
+              <input
+                type="checkbox"
+                checked={preferences.avoidWaterlogging}
+                onChange={e => setPreferences(p => ({ ...p, avoidWaterlogging: e.target.checked }))}
+                className="rounded accent-indigo-500"
+              />
+              <span>Avoid waterlogged roads</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer bg-white/5 p-2 rounded-xl border border-white/5 hover:bg-white/10 transition">
+              <input
+                type="checkbox"
+                checked={preferences.preferFastest}
+                onChange={e => setPreferences(p => ({ ...p, preferFastest: e.target.checked, preferSafer: !e.target.checked }))}
+                className="rounded accent-indigo-500"
+              />
+              <span>Prefer fastest route</span>
+            </label>
+          </div>
+        )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">        
+      {/* GPS Warning Banner if Permission Denied */}
+      {gpsError && (
+        <div className="p-3.5 bg-amber-50 border border-amber-200 text-amber-900 text-xs rounded-2xl flex items-center justify-between shadow-2xs">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+            <span>{gpsError}</span>
+          </div>
+          <button 
+            onClick={() => setGpsError(null)} 
+            className="text-amber-800 hover:text-amber-950 font-bold text-xs cursor-pointer"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* Error Message Banner */}
+      {errorMessage && (
+        <div className="p-4 bg-red-50 border border-red-200 text-red-900 text-xs rounded-2xl flex items-center justify-between shadow-2xs animate-shake">
+          <div className="flex items-center gap-2">
+            <AlertOctagon className="w-4 h-4 text-red-600 shrink-0" />
+            <span>{errorMessage}</span>
+          </div>
+          <button 
+            onClick={handleCalculateRoute} 
+            className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded-lg font-bold text-xs transition cursor-pointer"
+          >
+            Try Again
+          </button>
+        </div>
+      )}
+
+      {/* Main Grid: Controls + Map */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+        
+        {/* Left Control Column (5 Cols) */}
         <div className="lg:col-span-5 space-y-4">
-          <div className="bg-white border border-[#E2E8F0] rounded-2xl p-4 space-y-3 text-[#172033] shadow-xs">
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 bg-[#F8FAFC] px-3 py-2.5 rounded-xl border border-[#E2E8F0]">
-                <MapPin className="w-4 h-4 text-[#16A34A] shrink-0" />
-                <div className="w-full flex items-center gap-2">
-                  <div className="flex-1">
-                    <span className="text-[9.5px] text-[#64748B] uppercase font-mono block">
-                      {t("saferoute.origin", "Origin")}
-                    </span>
-                    <input
-                      type="text"
-                      value={originStr}
-                      onChange={(e) => setOriginStr(e.target.value)}
-                      placeholder={t("saferoute.originPlaceholder", "Origin Address / Landmark")}
-                      className="bg-transparent text-xs text-[#172033] w-full focus:outline-hidden font-medium"
-                    />
-                  </div>
-                  <button 
-                    onClick={useCurrentLocation}
-                    title={t("saferoute.useCurrentLoc", "Use My Current Location")}
-                    className="p-1.5 bg-white hover:bg-[#F1F5F9] border border-[#E2E8F0] text-[#64748B] hover:text-[#172033] rounded-lg transition-colors cursor-pointer shadow-2xs"
-                  >
-                    <Compass className="w-4 h-4" />
-                  </button>
-                </div>
+          
+          {/* Starting Point & Destination Card */}
+          <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs space-y-4">
+            
+            {/* STARTING POINT INPUT */}
+            <div className="relative">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[10px] font-mono font-black uppercase text-slate-500 tracking-wider">
+                  STARTING POINT
+                </span>
+                {originAccuracy && (
+                  <span className="text-[10px] font-mono font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                    GPS accuracy: ±{originAccuracy} m
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2.5 bg-slate-50 border border-slate-200 hover:border-slate-300 rounded-2xl px-3.5 py-3 transition focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-100">
+                <MapPin className="w-4 h-4 text-emerald-600 shrink-0" />
+                <input
+                  type="text"
+                  value={originStr}
+                  onFocus={() => setShowOriginDropdown(true)}
+                  onChange={e => {
+                    setOriginStr(e.target.value);
+                    setShowOriginDropdown(true);
+                  }}
+                  placeholder="Enter starting location or landmark..."
+                  className="w-full text-xs font-semibold text-slate-800 bg-transparent focus:outline-hidden"
+                />
+                <button
+                  type="button"
+                  onClick={requestCurrentLocation}
+                  title="Use My Current Location"
+                  className="p-1.5 bg-white hover:bg-slate-100 text-slate-600 rounded-lg border border-slate-200 transition cursor-pointer shadow-3xs"
+                >
+                  <Compass className="w-3.5 h-3.5 text-emerald-600" />
+                </button>
               </div>
 
-              <div className="flex items-center gap-2 bg-[#F8FAFC] px-3 py-2.5 rounded-xl border border-[#E2E8F0]">
-                <Navigation className="w-4 h-4 text-[#2563EB] shrink-0" />
-                <div className="w-full">
-                  <span className="text-[9.5px] text-[#64748B] uppercase font-mono block">
-                    {t("saferoute.destination", "Destination")}
-                  </span>
-                  <input
-                    type="text"
-                    value={destinationStr}
-                    onChange={(e) => setDestinationStr(e.target.value)}
-                    placeholder={t("saferoute.destinationPlaceholder", "Destination Address / Hub")}
-                    className="bg-transparent text-xs text-[#172033] w-full focus:outline-hidden font-medium"
-                  />
+              {/* Origin Autocomplete Suggestions Dropdown */}
+              {showOriginDropdown && originSuggestions.length > 0 && (
+                <div className="absolute top-full left-0 right-0 z-50 mt-1.5 bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden divide-y divide-slate-100">
+                  <div className="p-2 bg-slate-50 text-[10px] font-mono uppercase font-bold text-slate-500">
+                    Suggested Starting Points
+                  </div>
+                  {originSuggestions.map(sug => (
+                    <div
+                      key={sug.id}
+                      onClick={() => handleSelectOrigin(sug)}
+                      className="p-3 hover:bg-indigo-50/60 cursor-pointer transition text-left"
+                    >
+                      <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                        <MapPin className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        <span>{sug.label}</span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5 ml-5 line-clamp-1">{sug.subtitle}</p>
+                    </div>
+                  ))}
                 </div>
+              )}
+            </div>
+
+            {/* DESTINATION INPUT (WITH ROBUST AUTOCOMPLETE) */}
+            <div className="relative">
+              <span className="text-[10px] font-mono font-black uppercase text-slate-500 tracking-wider block mb-1.5">
+                DESTINATION
+              </span>
+              <div className="flex items-center gap-2.5 bg-slate-50 border border-slate-200 hover:border-slate-300 rounded-2xl px-3.5 py-3 transition focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-100">
+                <Search className="w-4 h-4 text-indigo-600 shrink-0" />
+                <input
+                  type="text"
+                  value={destinationStr}
+                  onFocus={() => setShowDestDropdown(true)}
+                  onChange={e => {
+                    setDestinationStr(e.target.value);
+                    setShowDestDropdown(true);
+                  }}
+                  onKeyDown={e => {
+                    if (e.key === "Enter") {
+                      setShowDestDropdown(false);
+                      handleCalculateRoute();
+                    }
+                  }}
+                  placeholder="Search location, sector, college, or landmark..."
+                  className="w-full text-xs font-semibold text-slate-800 bg-transparent focus:outline-hidden"
+                />
+                {destinationStr && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDestinationStr("");
+                      setDestCoord(null);
+                    }}
+                    className="p-1 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Destination Autocomplete Suggestions Dropdown */}
+              {showDestDropdown && destSuggestions.length > 0 && (
+                <div className="absolute top-full left-0 right-0 z-50 mt-1.5 bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden divide-y divide-slate-100 max-h-72 overflow-y-auto">
+                  <div className="p-2.5 bg-slate-50 flex items-center justify-between text-[10px] font-mono uppercase font-bold text-slate-500">
+                    <span>Suggestions for "{destinationStr}"</span>
+                    {isSearchingDest && <span className="text-indigo-600">Searching...</span>}
+                  </div>
+                  {destSuggestions.map(sug => (
+                    <div
+                      key={sug.id}
+                      onClick={() => handleSelectDestination(sug)}
+                      className="p-3 hover:bg-indigo-50/80 cursor-pointer transition text-left group"
+                    >
+                      <div className="text-xs font-bold text-slate-800 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <MapPin className="w-3.5 h-3.5 text-indigo-600 shrink-0 group-hover:scale-110 transition-transform" />
+                          <span className="group-hover:text-indigo-600 transition-colors">{sug.label}</span>
+                        </div>
+                        <span className="text-[9px] font-mono bg-slate-100 group-hover:bg-indigo-100 text-slate-600 group-hover:text-indigo-700 px-1.5 py-0.5 rounded">
+                          {sug.type}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5 ml-5 line-clamp-1">{sug.subtitle}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* QUICK SAVED PLACES SHORTCUTS */}
+            <div>
+              <span className="text-[9.5px] font-mono font-bold uppercase text-slate-400 block mb-2">
+                Quick Shortcuts
+              </span>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => handleQuickSelectPlace({ label: "Knowledge Park III, Greater Noida", lat: 28.4608, lng: 77.4631 })}
+                  className="px-2.5 py-1.5 bg-slate-50 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 border border-slate-200 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+                >
+                  <GraduationCap className="w-3.5 h-3.5 text-indigo-500" />
+                  <span>College (KP III)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleQuickSelectPlace({ label: "DLF Cyber City, Gurugram", lat: 28.4952, lng: 77.0891 })}
+                  className="px-2.5 py-1.5 bg-slate-50 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 border border-slate-200 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+                >
+                  <Briefcase className="w-3.5 h-3.5 text-indigo-500" />
+                  <span>Work (Cyber City)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleQuickSelectPlace({ label: "Connaught Place, New Delhi", lat: 28.6315, lng: 77.2167 })}
+                  className="px-2.5 py-1.5 bg-slate-50 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 border border-slate-200 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+                >
+                  <Home className="w-3.5 h-3.5 text-indigo-500" />
+                  <span>Central (CP)</span>
+                </button>
               </div>
             </div>
 
-            <div className="flex items-center justify-between pt-1">
-              <span className="text-[10px] text-[#64748B] font-mono uppercase">
-                {t("saferoute.travelMode", "Travel Mode:")}
-              </span>
-              <div className="flex items-center gap-1 bg-[#F8FAFC] p-1 rounded-xl border border-[#E2E8F0]">
+            {/* TRAVEL MODE SELECTION */}
+            <div className="pt-2 border-t border-slate-100">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[10px] font-mono font-black uppercase text-slate-500">
+                  TRAVEL MODE
+                </span>
+                <span className="text-[10px] text-slate-400 font-mono">
+                  {selectedTravelMode === "car" ? "Vehicular Arterials" : selectedTravelMode === "bike" ? "Two-Wheeler Urban Pace" : "Footpath & Walkway"}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-200">
                 <button
                   type="button"
                   onClick={() => setSelectedTravelMode("car")}
-                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-                    selectedTravelMode === "car" ? "bg-[#2563EB] text-white shadow-2xs" : "text-[#64748B] hover:text-[#172033]"
+                  className={`py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                    selectedTravelMode === "car"
+                      ? "bg-indigo-600 text-white shadow-xs"
+                      : "text-slate-600 hover:text-slate-900 hover:bg-white"
                   }`}
                 >
                   <Car className="w-3.5 h-3.5" />
-                  <span>{t("saferoute.car", "Car")}</span>
+                  <span>Car</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setSelectedTravelMode("bike")}
-                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-                    selectedTravelMode === "bike" ? "bg-[#2563EB] text-white shadow-2xs" : "text-[#64748B] hover:text-[#172033]"
+                  className={`py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                    selectedTravelMode === "bike"
+                      ? "bg-indigo-600 text-white shadow-xs"
+                      : "text-slate-600 hover:text-slate-900 hover:bg-white"
                   }`}
                 >
                   <Bike className="w-3.5 h-3.5" />
-                  <span>{t("saferoute.bike", "Bike")}</span>
+                  <span>Bike</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setSelectedTravelMode("walk")}
-                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-                    selectedTravelMode === "walk" ? "bg-[#2563EB] text-white shadow-2xs" : "text-[#64748B] hover:text-[#172033]"
+                  className={`py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                    selectedTravelMode === "walk"
+                      ? "bg-indigo-600 text-white shadow-xs"
+                      : "text-slate-600 hover:text-slate-900 hover:bg-white"
                   }`}
                 >
                   <Footprints className="w-3.5 h-3.5" />
-                  <span>{t("saferoute.walk", "Walk")}</span>
+                  <span>Walk</span>
                 </button>
               </div>
             </div>
 
+            {/* ACTION: FIND SAFE ROUTE BUTTON */}
             <button
               onClick={handleCalculateRoute}
-              disabled={calculating || !originStr || !destinationStr}
-              className="w-full py-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              disabled={calculating || !destinationStr}
+              className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-black text-xs rounded-2xl shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             >
               {calculating ? (
-                <span>{t("saferoute.calculating", "Calculating Route...")}</span>
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>CALCULATING SAFE ROUTE...</span>
+                </>
               ) : (
                 <>
-                  <Route className="w-3.5 h-3.5" />
-                  <span>{t("saferoute.findRoute", "Find Route")}</span>
+                  <Route className="w-4 h-4" />
+                  <span>FIND SAFE ROUTE</span>
                 </>
               )}
             </button>
           </div>
 
-          <div className="space-y-2.5">
-            {computedRoutes.map((rt) => {
-              const isSelected = rt.id === selectedRouteId;
-              const isRecommended = rt.id === "safe_route_0";
-              return (
-                <div
-                  key={rt.id}
-                  onClick={() => setSelectedRouteId(rt.id)}
-                  className={`p-4 rounded-2xl border transition-all cursor-pointer ${
-                    isSelected
-                      ? (isRecommended ? "bg-[#F0FDF4] border-[#16A34A] shadow-xs ring-2 ring-[#16A34A]/20" : "bg-[#EFF6FF] border-[#2563EB] shadow-xs ring-2 ring-[#2563EB]/20")
-                      : "bg-white border-[#E2E8F0] hover:border-[#CBD5E1] shadow-2xs"
-                  }`}
+          {/* RECENT SEARCHES PANEL */}
+          {recentDestinations.length > 0 && (
+            <div className="bg-white border border-slate-200 rounded-3xl p-4 shadow-xs text-left">
+              <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100">
+                <span className="text-[10px] font-mono font-bold uppercase text-slate-500 flex items-center gap-1.5">
+                  <Clock className="w-3 h-3 text-slate-400" />
+                  <span>Recent Destinations</span>
+                </span>
+                <button
+                  onClick={clearRecentHistory}
+                  className="text-[10px] text-slate-400 hover:text-rose-600 font-bold transition cursor-pointer"
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className={`px-2 py-0.5 border rounded text-[9px] font-mono font-bold ${
-                          isRecommended && isSelected ? "bg-[#DCFCE7] text-[#15803D] border-[#BBF7D0]" 
-                          : isSelected ? "bg-[#DBEAFE] text-[#1D4ED8] border-[#BFDBFE]" 
-                          : "bg-[#F8FAFC] text-[#64748B] border-[#E2E8F0]"
-                        }`}>
-                          {isRecommended ? t("saferoute.recommended", "RECOMMENDED") : t("saferoute.alternative", "ALTERNATIVE")}
-                        </span>
-                        <h4 className={`text-xs font-bold ${isSelected ? "text-[#172033]" : "text-[#475569]"}`}>
-                          {isHindi && isRecommended ? "सुरक्षित मार्ग (कम जोखिम)" : isHindi ? "वैकल्पिक मार्ग" : rt.name}
-                        </h4>
-                      </div>
-                      <div className="flex items-center gap-3 mt-2 text-xs font-mono">
-                        <span className={`font-bold ${isSelected ? "text-[#172033]" : "text-[#475569]"}`}>
-                          {rt.durationMinutes} {t("saferoute.min", "min")}
-                        </span>
-                        <span className="text-[#CBD5E1]">•</span>
-                        <span className="text-slate-500">{rt.distanceKm} {t("saferoute.km", "km")}</span>
-                        <span className="text-slate-400">•</span>
-                        <span className={rt.safetyScore >= 80 ? "text-emerald-500 font-bold" : rt.safetyScore >= 50 ? "text-amber-500 font-bold" : "text-rose-500 font-bold"}>
-                          {isHindi ? "स्कोर:" : "Score:"} {rt.safetyScore}/100
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="lg:col-span-7 space-y-4">          
-          <div className="bg-[#0D1322] border border-slate-800 rounded-2xl p-4 text-white space-y-3">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-800 text-xs">
-              <div className="flex items-center gap-2">
-                <Compass className="w-4 h-4 text-blue-400" />
-                <span className="font-bold text-slate-200">{t("saferoute.realtimeMap", "Real-time Map")}</span>
+                  Clear History
+                </button>
               </div>
-              <span className="font-mono text-[10.5px] text-slate-400">
-                {isHindi ? "अर्बनपल्स लाइव खतरा डेटा" : "OSRM + UrbanPulse Hazard Data"}
-              </span>
-            </div>
-            
-            <div 
-              ref={mapContainerRef} 
-              className="relative h-64 sm:h-80 w-full bg-slate-950 rounded-xl border border-slate-800 overflow-hidden" 
-              style={{ minHeight: "320px", zIndex: 0 }}
-            />
-          </div>
-
-          {currentSelectedRoute && (
-            <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs space-y-3">
-              <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-                <h3 className="text-xs font-bold text-slate-800 flex items-center gap-2">
-                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                  <span>{t("saferoute.routeRecommendation", "Route Recommendation")}</span>
-                </h3>
-              </div>
-              
-              <div className="space-y-3">
-                <p className="text-xs text-slate-700 font-medium">
-                  {currentSelectedRoute.id === "safe_route_0" 
-                    ? currentSelectedRoute.hazardsOnRoute.length === 0 
-                        ? (isHindi 
-                            ? "उपलब्ध अर्बनपल्स डेटा के अनुसार इस रास्ते पर कोई सक्रिय गड्ढा या खतरा दर्ज नहीं है।" 
-                            : "Low reported hazard exposure based on available UrbanPulse data.") 
-                        : (isHindi 
-                            ? `अर्बनपल्स डेटा के अनुसार यह सबसे सुरक्षित मार्ग है, जो कम समय में यात्रा सुनिश्चित करते हुए अन्य मार्गों की तुलना में ${currentSelectedRoute.hazardCountAvoided} अधिक खतरों से बचाता है।` 
-                            : `Safer route based on available UrbanPulse data. Recommended because it provides the best balance of travel time and safety, avoiding ${currentSelectedRoute.hazardCountAvoided} more hazards than alternatives.`)
-                    : (isHindi 
-                        ? "वैकल्पिक मार्ग चुना गया। इस मार्ग पर सड़क के गड्ढे या यातायात की स्थिति भिन्न हो सकती है।" 
-                        : "Alternative route selected. This route may have a different hazard profile or travel duration.")
-                  }
-                </p>
-
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                  <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200">
-                    <span className="block text-[10px] text-slate-500 uppercase font-mono mb-1">
-                      {t("saferoute.safetyScore", "Safety Score")}
-                    </span>
-                    <span className={`text-sm font-black ${currentSelectedRoute.safetyScore >= 80 ? 'text-emerald-600' : currentSelectedRoute.safetyScore >= 50 ? 'text-amber-600' : 'text-rose-600'}`}>
-                      {currentSelectedRoute.safetyScore}
-                    </span>
+              <div className="space-y-1">
+                {recentDestinations.map((item, idx) => (
+                  <div
+                    key={idx}
+                    onClick={() => {
+                      setDestinationStr(item.label);
+                      setDestCoord([item.lat, item.lng]);
+                    }}
+                    className="p-2 hover:bg-slate-50 rounded-xl cursor-pointer transition flex items-center justify-between text-xs"
+                  >
+                    <span className="font-semibold text-slate-700 truncate">{item.label}</span>
+                    <span className="text-[10px] font-mono text-indigo-600 font-bold">Use →</span>
                   </div>
-                  <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200">
-                    <span className="block text-[10px] text-slate-500 uppercase font-mono mb-1">
-                      {t("saferoute.activeHazards", "Active Hazards")}
-                    </span>
-                    <span className="text-sm font-black text-slate-800">{currentSelectedRoute.hazardsOnRoute.length}</span>
-                  </div>
-                  {currentSelectedRoute.hazardCountAvoided > 0 && (
-                    <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200">
-                      <span className="block text-[10px] text-slate-500 uppercase font-mono mb-1">
-                        {t("saferoute.avoided", "Avoided")}
-                      </span>
-                      <span className="text-sm font-black text-emerald-600">
-                        {currentSelectedRoute.hazardCountAvoided} {isHindi ? "खतरे" : "Known"}
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="p-3 bg-slate-100 border border-slate-200 rounded-xl flex items-start gap-2.5 text-xs text-slate-600 mt-2">
-                  <Info className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
-                  <p className="text-[10px] leading-relaxed text-slate-500">
-                    <strong>{t("saferoute.disclaimerTitle", "Disclaimer:")}</strong> {t("saferoute.disclaimer", "Safety score is based on available UrbanPulse reports and may not reflect all real-world conditions. UrbanPulse does not guarantee road or travel safety.")}
-                  </p>
-                </div>
+                ))}
               </div>
             </div>
           )}
+
+          {/* ROUTE ALTERNATIVES LIST */}
+          {computedRoutes.length > 0 && (
+            <div className="space-y-2.5">
+              <span className="text-[10px] font-mono font-black uppercase text-slate-500 px-1 block">
+                AVAILABLE ROUTE OPTIONS ({computedRoutes.length})
+              </span>
+
+              {computedRoutes.map((rt) => {
+                const isSelected = rt.id === selectedRouteId;
+                const isRec = rt.summaryLabel === "RECOMMENDED" || rt.id.includes("recommended");
+                const isFast = rt.summaryLabel === "FASTEST";
+
+                return (
+                  <div
+                    key={rt.id}
+                    onClick={() => {
+                      setSelectedRouteId(rt.id);
+                      setIsNavigating(false);
+                    }}
+                    className={`p-4 rounded-2xl border transition-all cursor-pointer text-left ${
+                      isSelected
+                        ? isRec
+                          ? "bg-emerald-50/60 border-emerald-500 ring-2 ring-emerald-500/20 shadow-sm"
+                          : "bg-indigo-50/60 border-indigo-500 ring-2 ring-indigo-500/20 shadow-sm"
+                        : "bg-white border-slate-200 hover:border-slate-300 shadow-2xs"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                          <span className={`px-2 py-0.5 rounded text-[9.5px] font-mono font-black uppercase tracking-wider ${
+                            isRec
+                              ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                              : isFast
+                              ? "bg-blue-100 text-blue-800 border border-blue-200"
+                              : "bg-slate-100 text-slate-700 border border-slate-200"
+                          }`}>
+                            {rt.summaryLabel || "ALTERNATIVE"}
+                          </span>
+                          <h4 className="text-xs font-black text-slate-900">{rt.name}</h4>
+                        </div>
+
+                        <div className="flex items-center gap-3 text-xs font-mono">
+                          <span className="font-bold text-slate-900">{rt.durationMinutes} min</span>
+                          <span className="text-slate-300">•</span>
+                          <span className="text-slate-600">{rt.distanceKm} km</span>
+                          <span className="text-slate-300">•</span>
+                          <span className={`font-bold ${
+                            rt.safetyScore >= 80 ? "text-emerald-600" : rt.safetyScore >= 60 ? "text-amber-600" : "text-rose-600"
+                          }`}>
+                            Safety {rt.safetyScore}/100
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="text-right shrink-0">
+                        <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
+                          rt.hazardsOnRoute.length === 0
+                            ? "bg-emerald-50 text-emerald-700"
+                            : "bg-amber-50 text-amber-700"
+                        }`}>
+                          {rt.hazardsOnRoute.length} hazard{rt.hazardsOnRoute.length !== 1 ? 's' : ''}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
         </div>
+
+        {/* Right Column (7 Cols): Map & Live Navigation HUD */}
+        <div className="lg:col-span-7 space-y-4">
+          
+          {/* MAP WRAPPER WITH NAVIGATION OVERLAY */}
+          <div className="relative bg-slate-950 border border-slate-800 rounded-3xl overflow-hidden shadow-md">
+            
+            {/* Map Top Telemetry Bar */}
+            <div className="p-3 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 flex items-center justify-between text-xs text-white z-10 relative">
+              <div className="flex items-center gap-2">
+                <Compass className="w-4 h-4 text-indigo-400" />
+                <span className="font-mono font-bold text-slate-200">URBANPULSE GIS TELEMETRY</span>
+              </div>
+              <div className="flex items-center gap-3 font-mono text-[10.5px]">
+                <span className="text-slate-400 flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
+                  OSRM + Live Reports
+                </span>
+              </div>
+            </div>
+
+            {/* LIVE ACTIVE NAVIGATION HUD */}
+            {isNavigating && currentRoute && (
+              <div className="absolute top-12 left-4 right-4 z-20 bg-slate-900/95 backdrop-blur-md border border-indigo-500/50 rounded-2xl p-4 text-white shadow-2xl animate-fadeIn">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="px-2 py-0.5 bg-emerald-500 text-white rounded text-[10px] font-mono font-black animate-pulse">
+                      NAVIGATING
+                    </span>
+                    <span className="text-xs font-mono text-slate-300">
+                      Step {navProgress.currentStep}/{navProgress.totalSteps}
+                    </span>
+                    {gpsUnavailable ? (
+                      <span className="px-2 py-0.5 bg-rose-500/20 border border-rose-500/40 text-rose-300 rounded text-[10px] font-mono font-bold">
+                        Live GPS unavailable
+                      </span>
+                    ) : currentGpsAccuracy !== null ? (
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-medium flex items-center gap-1 ${
+                        currentGpsAccuracy > 50
+                          ? "bg-amber-500/20 border border-amber-500/40 text-amber-300"
+                          : "bg-emerald-500/20 border border-emerald-500/40 text-emerald-300"
+                      }`}>
+                        <span>GPS accuracy: ±{currentGpsAccuracy}m</span>
+                        {currentGpsAccuracy > 50 && (
+                          <span className="font-bold text-amber-400">LOW ACCURACY</span>
+                        )}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleCenterOnMe}
+                      title="Center map on current GPS location"
+                      className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+                    >
+                      <Crosshair className="w-3.5 h-3.5 text-indigo-400" />
+                      <span className="hidden sm:inline">Center on Me</span>
+                    </button>
+                    <button
+                      onClick={handleStopNavigation}
+                      className="p-1.5 px-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-sm"
+                    >
+                      <Square className="w-3.5 h-3.5" />
+                      <span>Stop</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2 border-t border-slate-800">
+                  <div>
+                    <span className="text-[10px] text-slate-400 font-mono block">REMAINING TIME</span>
+                    <span className="text-base font-black text-white">
+                      {navProgress.remainingMinutes} min
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 font-mono block">REMAINING DISTANCE</span>
+                    <span className="text-base font-black text-white">
+                      {navProgress.remainingKm} km
+                    </span>
+                  </div>
+                  <div className="col-span-2 sm:col-span-1">
+                    <span className="text-[10px] text-slate-400 font-mono block">NEXT HAZARD</span>
+                    <span className="text-xs font-bold text-amber-400 truncate block">
+                      {nextHazardInfo
+                        ? `${nextHazardInfo.hazard.type} • ${nextHazardInfo.distanceKm} km`
+                        : "All Clear Ahead"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* REROUTE NOTIFICATION BANNER */}
+            {showRerouteBanner && alternativeRoute && (
+              <div className="absolute top-12 left-4 right-4 z-20 bg-amber-500 text-slate-950 rounded-2xl p-3.5 shadow-xl flex items-center justify-between gap-3 animate-fadeIn">
+                <div className="flex items-center gap-2.5">
+                  <AlertTriangle className="w-5 h-5 text-slate-950 shrink-0" />
+                  <div className="text-left leading-tight">
+                    <span className="text-xs font-black uppercase tracking-wider block">
+                      ⚠ HAZARDS DETECTED ON CURRENT ROUTE
+                    </span>
+                    <span className="text-[11px] font-medium opacity-90">
+                      Safer alternative available (Safety {alternativeRoute.safetyScore}/100, +{Math.max(1, alternativeRoute.durationMinutes - (currentRoute?.durationMinutes || 0))} min)
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    onClick={handleApplyReroute}
+                    className="px-3 py-1.5 bg-slate-950 text-white rounded-xl text-xs font-bold transition hover:bg-slate-800 cursor-pointer shadow-sm"
+                  >
+                    REROUTE
+                  </button>
+                  <button
+                    onClick={() => setShowRerouteBanner(false)}
+                    className="p-1.5 text-slate-950 hover:bg-black/10 rounded-lg cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Map Container */}
+            <div 
+              ref={mapContainerRef} 
+              className="relative w-full h-80 sm:h-96 bg-slate-950 z-0" 
+              style={{ minHeight: "360px" }}
+            />
+
+            {/* Map Legend Overlay */}
+            <div className="absolute bottom-3 left-3 z-10 bg-slate-950/90 backdrop-blur-md border border-slate-800 rounded-xl px-2.5 py-1.5 text-[9.5px] font-mono text-slate-300 flex flex-wrap items-center gap-2.5 shadow-lg pointer-events-none">
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-600 inline-block border border-white"></span> Start</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-600 inline-block border border-white"></span> Destination</span>
+              <span className="flex items-center gap-1"><span className="w-3.5 h-1 bg-blue-600 rounded inline-block"></span> Selected Route</span>
+              <span className="flex items-center gap-1"><span className="text-amber-400 font-bold">⚠</span> Hazard</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-500/50 border border-orange-500 inline-block"></span> High-Risk Zone</span>
+              <span className="flex items-center gap-1"><span className="w-3.5 h-1 bg-emerald-500 rounded inline-block"></span> Safe Segment</span>
+            </div>
+          </div>
+
+          {/* ROUTE SUMMARY CARD & NAVIGATION STARTER */}
+          {currentRoute && (
+            <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs space-y-4 text-left">
+              
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                <div>
+                  <span className="text-[10px] font-mono font-black uppercase text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
+                    {currentRoute.summaryLabel || "RECOMMENDED ROUTE"}
+                  </span>
+                  <h3 className="text-base font-black text-slate-900 mt-1">
+                    {currentRoute.name}
+                  </h3>
+                </div>
+
+                {!isNavigating ? (
+                  <button
+                    onClick={handleStartNavigation}
+                    className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-xl shadow-md transition flex items-center justify-center gap-2 cursor-pointer self-start sm:self-auto"
+                  >
+                    <Play className="w-4 h-4 fill-white" />
+                    <span>START NAVIGATION</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleStopNavigation}
+                    className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-black text-xs rounded-xl shadow-xs transition flex items-center justify-center gap-1.5 cursor-pointer self-start sm:self-auto"
+                  >
+                    <Square className="w-3.5 h-3.5 fill-white" />
+                    <span>EXIT NAVIGATION</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Key Route Metrics */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200">
+                  <span className="text-[10px] font-mono text-slate-500 uppercase block mb-1">DURATION</span>
+                  <span className="text-xl font-black text-slate-900">{currentRoute.durationMinutes} min</span>
+                </div>
+                <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200">
+                  <span className="text-[10px] font-mono text-slate-500 uppercase block mb-1">DISTANCE</span>
+                  <span className="text-xl font-black text-slate-900">{currentRoute.distanceKm} km</span>
+                </div>
+                <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200">
+                  <span className="text-[10px] font-mono text-slate-500 uppercase block mb-1">SAFETY SCORE</span>
+                  <span className={`text-xl font-black ${
+                    currentRoute.safetyScore >= 80 ? "text-emerald-600" : currentRoute.safetyScore >= 60 ? "text-amber-600" : "text-rose-600"
+                  }`}>
+                    {currentRoute.safetyScore}/100
+                  </span>
+                </div>
+                <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200">
+                  <span className="text-[10px] font-mono text-slate-500 uppercase block mb-1">ACTIVE HAZARDS</span>
+                  <span className="text-xl font-black text-slate-900">{currentRoute.hazardsOnRoute.length} active</span>
+                </div>
+              </div>
+
+              {/* ROUTE SAFETY ANALYSIS & BREAKDOWN */}
+              <div className="p-4 bg-slate-50/80 rounded-2xl border border-slate-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black uppercase text-slate-700 tracking-wider font-mono">
+                    ROUTE SAFETY ANALYSIS
+                  </span>
+                  <span className="text-[10px] font-mono font-bold text-slate-500">
+                    UrbanPulse Route Safety Score
+                  </span>
+                </div>
+
+                {/* Visual Segment Bar */}
+                <div className="w-full h-3 rounded-full bg-slate-200 overflow-hidden flex shadow-inner">
+                  <div 
+                    style={{ width: `${Math.max(15, currentRoute.safetyBreakdown?.hazardExposure || 80)}%` }} 
+                    className="bg-emerald-500 h-full"
+                    title="Safe segments"
+                  />
+                  <div 
+                    style={{ width: `${Math.min(40, (currentRoute.hazardsOnRoute.length * 8))}%` }} 
+                    className="bg-amber-500 h-full"
+                    title="Moderate hazard zones"
+                  />
+                  <div 
+                    style={{ width: `${Math.min(30, currentRoute.hazardsOnRoute.filter(h => (h.severity || 0) >= 80).length * 15)}%` }} 
+                    className="bg-rose-500 h-full"
+                    title="High-risk segments"
+                  />
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 text-center text-xs font-mono pt-1">
+                  <div className="bg-white p-2 rounded-xl border border-slate-200">
+                    <span className="text-[9.5px] text-slate-400 uppercase block">Hazard Exposure</span>
+                    <strong className="text-slate-800">{currentRoute.safetyBreakdown?.hazardExposure || 92}%</strong>
+                  </div>
+                  <div className="bg-white p-2 rounded-xl border border-slate-200">
+                    <span className="text-[9.5px] text-slate-400 uppercase block">Road Risk</span>
+                    <strong className="text-slate-800">{currentRoute.safetyBreakdown?.roadRisk || 88}%</strong>
+                  </div>
+                  <div className="bg-white p-2 rounded-xl border border-slate-200">
+                    <span className="text-[9.5px] text-slate-400 uppercase block">Active Incidents</span>
+                    <strong className="text-slate-800">{currentRoute.safetyBreakdown?.activeIncidents || 96}%</strong>
+                  </div>
+                </div>
+
+                <p className="text-[10.5px] text-slate-500 leading-relaxed italic">
+                  Based on currently available incident reports within a 65-meter buffer of this road corridor.
+                </p>
+              </div>
+
+              {/* HAZARDS ON THIS ROUTE SECTION */}
+              <div className="space-y-2 pt-1">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-black uppercase text-slate-700 tracking-wider font-mono">
+                    HAZARDS ON THIS ROUTE ({currentRoute.hazardsOnRoute.length})
+                  </h4>
+                  <span className="text-[10px] text-slate-400 font-mono">
+                    Click to inspect on map
+                  </span>
+                </div>
+
+                {currentRoute.hazardsOnRoute.length === 0 ? (
+                  <div className="p-4 bg-emerald-50/60 border border-emerald-200 rounded-2xl flex items-center gap-2.5 text-emerald-800 text-xs font-medium">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>No active reported hazards found along this commuter corridor. Corridor clear.</span>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {currentRoute.hazardsOnRoute.map((h, i) => {
+                      const isHighSev = (h.severity || 0) >= 75;
+                      const distKm = ((h.distanceAlongRouteMeters || 0) / 1000).toFixed(1);
+                      const isHighlighted = highlightedHazardId === (h.id || `${h.lat}_${h.lng}`);
+
+                      return (
+                        <div
+                          key={i}
+                          onClick={() => handleFocusHazard(h)}
+                          className={`p-3 rounded-2xl border transition cursor-pointer text-left ${
+                            isHighlighted
+                              ? "bg-amber-50 border-amber-400 ring-2 ring-amber-400/20"
+                              : "bg-slate-50 hover:bg-slate-100/80 border-slate-200"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <div className="flex items-center gap-1.5">
+                              <AlertTriangle className={`w-3.5 h-3.5 ${isHighSev ? 'text-rose-600' : 'text-amber-600'}`} />
+                              <span className="text-xs font-bold text-slate-900">{h.type}</span>
+                            </div>
+                            <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded ${
+                              isHighSev ? "bg-rose-100 text-rose-800" : "bg-amber-100 text-amber-800"
+                            }`}>
+                              {isHighSev ? "HIGH" : "MEDIUM"}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-600 line-clamp-1">"{h.description}"</p>
+                          <div className="flex items-center justify-between text-[10px] font-mono text-slate-500 mt-2 pt-1.5 border-t border-slate-200/60">
+                            <span>{distKm} km ahead</span>
+                            <span className="text-indigo-600 font-bold hover:underline">Inspect →</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+            </div>
+          )}
+
+        </div>
+
       </div>
+
     </div>
   );
 }

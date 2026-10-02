@@ -39,6 +39,7 @@ import RoadAiCandidateReview from "./components/RoadAiCandidateReview";
 import SafeRouteNav from "./components/SafeRouteNav";
 import CitizenEmergencySOS from "./components/CitizenEmergencySOS";
 import CitizenHome from "./components/CitizenHome";
+import CitizenProfile from "./components/CitizenProfile";
 import MunicipalHome from "./components/MunicipalHome";
 import MunicipalCopilot from "./components/MunicipalCopilot";
 import FooterEmergencyButton from "./components/FooterEmergencyButton";
@@ -94,16 +95,18 @@ export default function App() {
     if (!userProfile) return null;
     return {
       id: userProfile.uid,
+      uid: userProfile.uid,
       email: userProfile.email,
       fullName: userProfile.name || userProfile.fullName || "Urban Citizen",
       role: (userProfile.role as any) || "citizen",
+      photoURL: userProfile.photoURL || null,
       teamId: userProfile.teamId,
       teamName: userProfile.teamName,
       teamLead: userProfile.teamLead,
       availability: userProfile.availability,
       createdAt: userProfile.createdAt
     };
-  }, [userProfile?.uid, userProfile?.email, userProfile?.name, userProfile?.fullName, userProfile?.role, userProfile?.teamId, userProfile?.teamName, userProfile?.teamLead, userProfile?.availability, userProfile?.createdAt]);
+  }, [userProfile?.uid, userProfile?.email, userProfile?.name, userProfile?.fullName, userProfile?.role, userProfile?.photoURL, userProfile?.teamId, userProfile?.teamName, userProfile?.teamLead, userProfile?.availability, userProfile?.createdAt]);
 
   const [reports, setReports] = useState<Report[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -169,7 +172,7 @@ export default function App() {
   // High-fidelity sidebar terminal states
   const [activeTerminal, setActiveTerminal] = useState<"citizen" | "admin" | "field_team" | "split">("citizen");
   const [activeSubTab, setActiveSubTab] = useState<
-    "citizen-home" | "my-reports" | "municipal-home" | "command-center" | "citizen-signals" | "incident-intelligence" | "field-verification" | "infrastructure" | "dispatch-management" | "road-scanner" | "candidate-review" | "safe-route" | "rewards" | "emergency-sos" | "copilot" | "analytics" | "digital-twin" | "safety" | "traffic" | "environmental" | "emergency" | "field-operations" | "admin-panel" | "admin-users" | "admin-teams" | "admin-settings" | "gis-navigation" | "safety-sos" | "field-copilot" | "team-profile" | "duplicate-reports"
+    "citizen-home" | "citizen-profile" | "my-reports" | "municipal-home" | "command-center" | "citizen-signals" | "incident-intelligence" | "field-verification" | "infrastructure" | "dispatch-management" | "road-scanner" | "candidate-review" | "safe-route" | "rewards" | "emergency-sos" | "copilot" | "analytics" | "digital-twin" | "safety" | "traffic" | "environmental" | "emergency" | "field-operations" | "admin-panel" | "admin-users" | "admin-teams" | "admin-settings" | "gis-navigation" | "safety-sos" | "field-copilot" | "team-profile" | "duplicate-reports"
   >("citizen-home");
 
   const processedReports = useMemo(() => {
@@ -720,6 +723,7 @@ export default function App() {
       title: t("nav.overview", "OVERVIEW"),
       items: [
         { id: "citizen-home", label: t("nav.citizenHome", "Overview"), desc: t("nav.citizenHomeDesc", "Citizen civic portal"), icon: LayoutDashboard },
+        { id: "citizen-profile", label: t("nav.citizenProfile", "My Profile"), desc: t("nav.citizenProfileDesc", "Manage account & contact"), icon: UserIcon },
         { id: "my-reports", label: t("nav.myReports", "My Reports"), desc: t("nav.myReportsDesc", "Track filed issues"), icon: FileText },
       ]
     },
@@ -892,21 +896,53 @@ export default function App() {
 
           {/* ACTIVE ACCOUNT PROFILE TRAY */}
           <div className="p-3.5 border-t border-[#D9E3F0] bg-[#EAF1FA] flex flex-col gap-2 shrink-0">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5 min-w-0">
-                <div className={`w-8 h-8 rounded-xl ${
-                  currentUser.role === "field_team" 
-                    ? "bg-[#16A34A]" 
-                    : currentUser.role === "admin" 
-                    ? "bg-[#7C3AED]" 
-                    : currentUser.role === "municipal" 
-                    ? "bg-[#F59E0B]" 
-                    : "bg-[#2563EB]"
-                } text-white flex items-center justify-center font-bold text-xs shadow-xs shrink-0 select-none uppercase`}>
-                  {currentUser.fullName.split(" ").map(w => w[0]).join("").substring(0, 2)}
+            <div className="flex items-center justify-between gap-2.5">
+              <button
+                type="button"
+                onClick={() => {
+                  if (currentUser.role === "citizen") {
+                    setActiveSubTab("citizen-profile");
+                    setIsSidebarMobileOpen(false);
+                  }
+                }}
+                className={`flex items-center gap-2.5 min-w-0 flex-1 text-left p-1.5 -m-1 rounded-xl transition group ${
+                  currentUser.role === "citizen" 
+                    ? "cursor-pointer hover:bg-[#DCE4EE]/70 active:scale-[0.98]" 
+                    : ""
+                }`}
+                title={currentUser.role === "citizen" ? "Open My Citizen Profile" : currentUser.fullName}
+              >
+                {/* Avatar with fallback */}
+                <div className="relative shrink-0">
+                  {currentUser.photoURL ? (
+                    <img 
+                      src={currentUser.photoURL} 
+                      alt={currentUser.fullName}
+                      className="w-8.5 h-8.5 rounded-xl object-cover border border-slate-300 shadow-2xs"
+                      onError={(e) => {
+                        (e.target as HTMLElement).style.display = "none";
+                      }}
+                    />
+                  ) : null}
+                  <div className={`w-8.5 h-8.5 rounded-xl ${
+                    currentUser.photoURL ? "hidden" : "flex"
+                  } ${
+                    currentUser.role === "field_team" 
+                      ? "bg-[#16A34A]" 
+                      : currentUser.role === "admin" 
+                      ? "bg-[#7C3AED]" 
+                      : currentUser.role === "municipal" 
+                      ? "bg-[#F59E0B]" 
+                      : "bg-[#2563EB]"
+                  } text-white items-center justify-center font-bold text-xs shadow-xs shrink-0 select-none uppercase`}>
+                    {currentUser.fullName.split(" ").map(w => w[0]).join("").substring(0, 2)}
+                  </div>
                 </div>
+
                 <div className="min-w-0 flex-1">
-                  <div className="text-[11.5px] font-extrabold text-[#172033] truncate leading-tight">{currentUser.fullName}</div>
+                  <div className="text-[11.5px] font-extrabold text-[#172033] truncate leading-tight group-hover:text-[#2563EB] transition-colors">
+                    {currentUser.fullName}
+                  </div>
                   <div className="text-[9px] text-[#64748B] font-mono truncate flex items-center gap-1 mt-0.5">
                     <span className={`w-1.5 h-1.5 rounded-full ${
                       currentUser.role === "field_team" 
@@ -928,7 +964,12 @@ export default function App() {
                     </span>
                   </div>
                 </div>
-              </div>
+
+                {currentUser.role === "citizen" && (
+                  <ChevronRight className="w-4 h-4 text-[#94A3B8] group-hover:text-[#2563EB] group-hover:translate-x-0.5 transition-all shrink-0" />
+                )}
+              </button>
+
               <button
                 onClick={handleLogout}
                 className="p-1.5 text-[#64748B] hover:text-[#DC2626] hover:bg-[#DCE4EE]/70 rounded-lg transition-all cursor-pointer shrink-0"
@@ -1266,16 +1307,30 @@ export default function App() {
                   onClick={() => setShowUserDropdown(prev => !prev)}
                   className="flex items-center gap-2.5 p-1 sm:px-2 rounded-xl hover:bg-[#F8FAFC] border border-transparent hover:border-[#E2E8F0] transition-all cursor-pointer group"
                 >
-                  <div className={`w-8 h-8 rounded-xl ${
-                    currentUser.role === "admin" 
-                      ? "bg-gradient-to-tr from-[#6366F1] to-[#7C3AED]" 
-                      : currentUser.role === "municipal" 
-                      ? "bg-[#F59E0B]" 
-                      : currentUser.role === "field_team" 
-                      ? "bg-[#16A34A]" 
-                      : "bg-[#2563EB]"
-                  } text-white flex items-center justify-center font-bold text-xs shadow-xs shrink-0 select-none uppercase`}>
-                    {currentUser.fullName.split(" ").map(w => w[0]).join("").substring(0, 2)}
+                  <div className="relative shrink-0">
+                    {currentUser.photoURL ? (
+                      <img
+                        src={currentUser.photoURL}
+                        alt={currentUser.fullName}
+                        className="w-8 h-8 rounded-xl object-cover border border-slate-300 shadow-2xs"
+                        onError={(e) => {
+                          (e.target as HTMLElement).style.display = "none";
+                        }}
+                      />
+                    ) : null}
+                    <div className={`w-8 h-8 rounded-xl ${
+                      currentUser.photoURL ? "hidden" : "flex"
+                    } ${
+                      currentUser.role === "admin" 
+                        ? "bg-gradient-to-tr from-[#6366F1] to-[#7C3AED]" 
+                        : currentUser.role === "municipal" 
+                        ? "bg-[#F59E0B]" 
+                        : currentUser.role === "field_team" 
+                        ? "bg-[#16A34A]" 
+                        : "bg-[#2563EB]"
+                    } text-white items-center justify-center font-bold text-xs shadow-xs shrink-0 select-none uppercase`}>
+                      {currentUser.fullName.split(" ").map(w => w[0]).join("").substring(0, 2)}
+                    </div>
                   </div>
                   <div className="text-left hidden md:block">
                     <div className="text-xs font-bold text-[#0F172A] group-hover:text-[#2563EB] transition-colors leading-tight">
@@ -1291,12 +1346,21 @@ export default function App() {
                 {/* User Dropdown */}
                 {showUserDropdown && (
                   <div className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-xl border border-[#E2E8F0] p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
-                    <div className="px-3 py-2 border-b border-[#F1F5F9]">
-                      <p className="text-xs font-bold text-[#0F172A] truncate">{currentUser.fullName}</p>
-                      <p className="text-[11px] text-[#64748B] font-mono truncate">{currentUser.email}</p>
-                      <span className="inline-block mt-1 px-2 py-0.5 bg-[#F5F3FF] text-[#6D28D9] text-[9.5px] font-mono font-bold rounded border border-[#DDD6FE]">
-                        {currentUser.role === "admin" ? "SUPER ADMIN CLEARANCE" : currentUser.role.toUpperCase()}
-                      </span>
+                    <div className="px-3 py-2 border-b border-[#F1F5F9] flex items-center gap-2.5">
+                      {currentUser.photoURL ? (
+                        <img
+                          src={currentUser.photoURL}
+                          alt={currentUser.fullName}
+                          className="w-8.5 h-8.5 rounded-xl object-cover shrink-0 border border-slate-200"
+                        />
+                      ) : null}
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-bold text-[#0F172A] truncate">{currentUser.fullName}</p>
+                        <p className="text-[11px] text-[#64748B] font-mono truncate">{currentUser.email}</p>
+                        <span className="inline-block mt-0.5 px-2 py-0.5 bg-[#F5F3FF] text-[#6D28D9] text-[9.5px] font-mono font-bold rounded border border-[#DDD6FE]">
+                          {currentUser.role === "admin" ? "SUPER ADMIN CLEARANCE" : currentUser.role.toUpperCase()}
+                        </span>
+                      </div>
                     </div>
 
                     <div className="py-1">
@@ -1376,12 +1440,22 @@ export default function App() {
                         <>
                           <button
                             onClick={() => {
+                              setActiveSubTab("citizen-profile");
+                              setShowUserDropdown(false);
+                            }}
+                            className="w-full text-left px-3 py-2 text-xs font-semibold text-[#334155] hover:bg-[#F8FAFC] hover:text-[#2563EB] rounded-lg transition-colors flex items-center gap-2 cursor-pointer"
+                          >
+                            <UserIcon className="w-3.5 h-3.5 text-[#2563EB]" />
+                            <span>My Profile</span>
+                          </button>
+                          <button
+                            onClick={() => {
                               setActiveSubTab("citizen-home");
                               setShowUserDropdown(false);
                             }}
                             className="w-full text-left px-3 py-2 text-xs font-semibold text-[#334155] hover:bg-[#F8FAFC] hover:text-[#2563EB] rounded-lg transition-colors flex items-center gap-2 cursor-pointer"
                           >
-                            <LayoutDashboard className="w-3.5 h-3.5 text-[#2563EB]" />
+                            <LayoutDashboard className="w-3.5 h-3.5 text-[#64748B]" />
                             <span>Citizen Overview</span>
                           </button>
                           <button
@@ -1464,6 +1538,11 @@ export default function App() {
                 userName={currentUser.fullName}
                 reports={reports}
                 onSelectReport={(rep) => setSelectedReport(rep)}
+              />
+            )}
+            {activeSubTab === "citizen-profile" && (
+              <CitizenProfile 
+                onBackToOverview={() => setActiveSubTab("citizen-home")}
               />
             )}
             {activeSubTab === "municipal-home" && (
@@ -1837,6 +1916,7 @@ export default function App() {
                   <DuplicateReportsView
                     reports={reports}
                     onSelectReport={(rep) => setSelectedReport(rep)}
+                    onRefreshReports={() => syncOperationalDatasets(currentUser.email, currentUser.role)}
                   />
                 </div>
               </RoleGuard>

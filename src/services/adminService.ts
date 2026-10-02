@@ -119,10 +119,24 @@ export async function getAdminUsers(): Promise<User[]> {
       const data = d.data();
       return {
         id: d.id,
+        uid: d.id,
         email: data.email || "",
-        fullName: data.fullName || data.name || "User",
+        fullName: data.fullName || data.name || data.displayName || "User",
+        name: data.name || data.fullName || "User",
+        displayName: data.displayName || data.fullName || data.name || "User",
         role: (data.role || "citizen") as UserRole,
-        active: data.active !== false,
+        active: data.active !== false && data.status !== "DEACTIVATED",
+        status: data.status || (data.active !== false ? "ACTIVE" : "DEACTIVATED"),
+        phone: data.phone || data.phoneNumber || "",
+        phoneNumber: data.phoneNumber || data.phone || "",
+        photoURL: data.photoURL || null,
+        citizenId: data.citizenId || `CIT-${d.id.slice(0, 8).toUpperCase()}`,
+        dateOfBirth: data.dateOfBirth,
+        gender: data.gender,
+        address: data.address,
+        emergencyContact: data.emergencyContact,
+        notificationPreferences: data.notificationPreferences,
+        profileCompleted: data.profileCompleted,
         department: data.department || "",
         teamId: data.teamId,
         teamName: data.teamName,
@@ -132,7 +146,8 @@ export async function getAdminUsers(): Promise<User[]> {
         badges: data.badges || [],
         scansCount: data.scansCount || 0,
         reportsCount: data.reportsCount || 0,
-        createdAt: data.createdAt || new Date().toISOString()
+        createdAt: data.createdAt || new Date().toISOString(),
+        updatedAt: data.updatedAt
       } as User;
     });
 

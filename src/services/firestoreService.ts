@@ -31,18 +31,124 @@ export { reportConverter, createReport, getReport, getCitizenReports, getMunicip
 // FIRESTORE TYPED CONVERTERS
 // ==========================================
 
+export function calculateProfileCompletion(profile?: Partial<UserProfile> | null): {
+  percentage: number;
+  completed: string[];
+  missing: string[];
+} {
+  if (!profile) {
+    return {
+      percentage: 0,
+      completed: [],
+      missing: ["Name", "Email", "Phone", "City", "Profile photo", "Emergency contact"]
+    };
+  }
+
+  const completed: string[] = [];
+  const missing: string[] = [];
+
+  // Core fields weighting
+  if (profile.fullName || profile.name || profile.displayName) {
+    completed.push("Name");
+  } else {
+    missing.push("Name");
+  }
+
+  if (profile.email) {
+    completed.push("Email");
+  } else {
+    missing.push("Email");
+  }
+
+  if (profile.phoneNumber || profile.phone) {
+    completed.push("Phone");
+  } else {
+    missing.push("Phone");
+  }
+
+  if (profile.address?.city) {
+    completed.push("City");
+  } else {
+    missing.push("City");
+  }
+
+  if (profile.photoURL) {
+    completed.push("Profile photo");
+  } else {
+    missing.push("Profile photo");
+  }
+
+  if (profile.emergencyContact?.name && profile.emergencyContact?.phone) {
+    completed.push("Emergency contact");
+  } else {
+    missing.push("Emergency contact");
+  }
+
+  // Weightings: Name(20), Email(20), Phone(20), City(20), Photo(10), Emergency Contact(10)
+  let score = 0;
+  if (completed.includes("Name")) score += 20;
+  if (completed.includes("Email")) score += 20;
+  if (completed.includes("Phone")) score += 20;
+  if (completed.includes("City")) score += 20;
+  if (completed.includes("Profile photo")) score += 10;
+  if (completed.includes("Emergency contact")) score += 10;
+
+  return {
+    percentage: Math.min(100, Math.max(0, score)),
+    completed,
+    missing
+  };
+}
+
 export const userConverter: FirestoreDataConverter<UserProfile> = {
   toFirestore(user: UserProfile): DocumentData {
+    const citizenId = user.citizenId || (user.uid ? `CIT-${user.uid.slice(0, 8).toUpperCase()}` : undefined);
+    const completion = calculateProfileCompletion(user);
+
     return stripUndefinedDeep({
       uid: user.uid,
+      id: user.id || user.uid,
       email: user.email || "",
       name: user.name || user.fullName || "Citizen",
       fullName: user.fullName || user.name || "Citizen",
+      displayName: user.displayName || user.fullName || user.name || "Citizen",
       role: user.role || "citizen",
+      phone: user.phone || user.phoneNumber || undefined,
+      phoneNumber: user.phoneNumber || user.phone || undefined,
+      photoURL: user.photoURL !== undefined ? user.photoURL : null,
+      citizenId,
+      dateOfBirth: user.dateOfBirth || undefined,
+      gender: user.gender || undefined,
+      address: user.address ? {
+        house: user.address.house || undefined,
+        street: user.address.street || undefined,
+        city: user.address.city || undefined,
+        state: user.address.state || undefined,
+        pinCode: user.address.pinCode || undefined,
+        landmark: user.address.landmark || undefined,
+      } : undefined,
+      emergencyContact: user.emergencyContact ? {
+        name: user.emergencyContact.name || undefined,
+        relationship: user.emergencyContact.relationship || undefined,
+        phone: user.emergencyContact.phone || undefined,
+      } : undefined,
+      notificationPreferences: user.notificationPreferences ? {
+        reportStatusUpdates: user.notificationPreferences.reportStatusUpdates ?? true,
+        municipalUpdates: user.notificationPreferences.municipalUpdates ?? true,
+        emergencyAlerts: user.notificationPreferences.emergencyAlerts ?? true,
+      } : {
+        reportStatusUpdates: true,
+        municipalUpdates: true,
+        emergencyAlerts: true,
+      },
+      profileCompleted: completion.percentage,
+      status: user.status || (user.active === false ? "DEACTIVATED" : "ACTIVE"),
+      active: user.active !== false && user.status !== "DEACTIVATED",
       points: user.points ?? 0,
       badges: user.badges || ["Civic Pioneer"],
       scansCount: user.scansCount ?? 0,
       reportsCount: user.reportsCount ?? 0,
+      department: user.department || undefined,
       ...(user.teamId ? { teamId: user.teamId } : {}),
       ...(user.teamName ? { teamName: user.teamName } : {}),
       ...(user.teamLead ? { teamLead: user.teamLead } : {}),
@@ -53,12 +159,48 @@ export const userConverter: FirestoreDataConverter<UserProfile> = {
   },
   fromFirestore(snapshot: QueryDocumentSnapshot, options: SnapshotOptions): UserProfile {
     const data = snapshot.data(options);
-    return {
+    const citizenId = data.citizenId || `CIT-${snapshot.id.slice(0, 8).toUpperCase()}`;
+
+    const profile: UserProfile = {
       uid: snapshot.id,
+      id: snapshot.id,
       email: data.email || "",
       name: data.name || data.fullName || "Citizen",
       fullName: data.fullName || data.name || "Citizen",
+      displayName: data.displayName || data.fullName || data.name || "Citizen",
       role: data.role || "citizen",
+      phone: data.phone || data.phoneNumber || undefined,
+      phoneNumber: data.phoneNumber || data.phone || undefined,
+      photoURL: data.photoURL || null,
+      citizenId,
+      dateOfBirth: data.dateOfBirth || undefined,
+      gender: data.gender || undefined,
+      address: data.address ? {
+        house: data.address.house || "",
+        street: data.address.street || "",
+        city: data.address.city || "",
+        state: data.address.state || "",
+        pinCode: data.address.pinCode || "",
+        landmark: data.address.landmark || "",
+      } : undefined,
+      emergencyContact: data.emergencyContact ? {
+        name: data.emergencyContact.name || "",
+        relationship: data.emergencyContact.relationship || "",
+        phone: data.emergencyContact.phone || "",
+      } : undefined,
+      notificationPreferences: data.notificationPreferences ? {
+        reportStatusUpdates: data.notificationPreferences.reportStatusUpdates ?? true,
+        municipalUpdates: data.notificationPreferences.municipalUpdates ?? true,
+        emergencyAlerts: data.notificationPreferences.emergencyAlerts ?? true,
+      } : {
+        reportStatusUpdates: true,
+        municipalUpdates: true,
+        emergencyAlerts: true,
+      },
+      profileCompleted: typeof data.profileCompleted === "number" ? data.profileCompleted : undefined,
+      status: data.status || (data.active === false ? "DEACTIVATED" : "ACTIVE"),
+      active: data.active !== false && data.status !== "DEACTIVATED",
+      department: data.department || undefined,
       points: data.points ?? 0,
       badges: data.badges || ["Civic Pioneer"],
       scansCount: data.scansCount ?? 0,
@@ -70,6 +212,12 @@ export const userConverter: FirestoreDataConverter<UserProfile> = {
       createdAt: data.createdAt || new Date().toISOString(),
       updatedAt: data.updatedAt || new Date().toISOString()
     };
+
+    if (profile.profileCompleted === undefined) {
+      profile.profileCompleted = calculateProfileCompletion(profile).percentage;
+    }
+
+    return profile;
   }
 };
 

@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { getFirestore, doc, getDoc } from "firebase/firestore";
+import { getFirestore, initializeFirestore, doc, getDoc } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import config from "../../firebase-applet-config.json";
 
@@ -25,7 +25,16 @@ const dbId = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatab
   ? firebaseConfig.firestoreDatabaseId
   : undefined;
 
-export const db = getFirestore(app, dbId);
+let firestoreInstance: any;
+try {
+  firestoreInstance = initializeFirestore(app, {
+    experimentalAutoDetectLongPolling: true,
+  }, dbId);
+} catch {
+  firestoreInstance = getFirestore(app, dbId);
+}
+
+export const db = firestoreInstance;
 export const storage = getStorage(app);
 
 // Operation types for standard Firebase Error Handling
@@ -104,13 +113,6 @@ export async function testFirestoreConnection(): Promise<boolean> {
     // Any other response (like permission denied or not found) confirms server contact
     return true;
   }
-}
-
-// Initial connection verification deferred to allow network stack startup
-if (typeof window !== "undefined") {
-  setTimeout(() => {
-    testFirestoreConnection().catch(() => {});
-  }, 1000);
 }
 
 /**

@@ -100,7 +100,7 @@ export const CitizenProfile: React.FC<CitizenProfileProps> = ({ onBackToOverview
   }, [userProfile]);
 
   // Derived Citizen ID & Completion
-  const citizenId = userProfile?.citizenId || (userProfile?.uid ? `CIT-${userProfile.uid.slice(0, 8).toUpperCase()}` : "CIT-84729103");
+  const citizenId = userProfile?.citizenId || (userProfile?.uid ? `CIT-${userProfile.uid.slice(0, 8).toUpperCase()}` : (user?.uid ? `CIT-${user.uid.slice(0, 8).toUpperCase()}` : "CIT-84729103"));
   const completionStats = calculateProfileCompletion({
     fullName,
     email: userProfile?.email || user?.email || "",

@@ -427,7 +427,7 @@ export async function assignFieldTask(
   }
 
   // 2. Fetch existing report title if possible
-  let reportTitle = `Incident #${reportId.slice(-6).toUpperCase()}`;
+  let reportTitle = `Incident #${(reportId || "").slice(-6).toUpperCase()}`;
   let reporterEmail = "citizen@urbanpulse.ai";
   if (db) {
     try {
@@ -491,7 +491,7 @@ export async function assignFieldTask(
         activeTaskCount: 1,
         currentIncidentId: reportId,
         currentIncidentTitle: reportTitle,
-        lastOperationalStatus: `Dispatched to Incident #${reportId.slice(-6).toUpperCase()}`,
+        lastOperationalStatus: `Dispatched to Incident #${(reportId || "").slice(-6).toUpperCase()}`,
         lastUpdate: now,
         updatedAt: now
       }));
@@ -511,7 +511,7 @@ export async function assignFieldTask(
     "field_team",
     "",
     "New Work Order Dispatched",
-    `Municipal Dispatch assigned Incident #${reportId.slice(-6).toUpperCase()} (${reportTitle}) to ${teamName}. Target SLA: ${calculatedHours} hours.`,
+    `Municipal Dispatch assigned Incident #${(reportId || "").slice(-6).toUpperCase()} (${reportTitle}) to ${teamName}. Target SLA: ${calculatedHours} hours.`,
     "task_assigned",
     reportId
   );
@@ -536,7 +536,7 @@ export async function reassignFieldTask(
   let oldTeamName = "Previous Squad";
   let existingHistory: ReassignmentRecord[] = [];
   let currentPriority: Priority = priority || "Medium";
-  let reportTitle = `Incident #${reportId.slice(-6).toUpperCase()}`;
+  let reportTitle = `Incident #${(reportId || "").slice(-6).toUpperCase()}`;
 
   if (db) {
     try {
@@ -654,7 +654,7 @@ export async function reassignFieldTask(
         activeTaskCount: 1,
         currentIncidentId: reportId,
         currentIncidentTitle: reportTitle,
-        lastOperationalStatus: `Received reassigned work order #${reportId.slice(-6).toUpperCase()}`,
+        lastOperationalStatus: `Received reassigned work order #${(reportId || "").slice(-6).toUpperCase()}`,
         lastUpdate: now,
         updatedAt: now
       });
@@ -672,7 +672,7 @@ export async function reassignFieldTask(
     "field_team",
     "",
     "Work Order Reassigned",
-    `Municipal Dispatch reassigned Incident #${reportId.slice(-6).toUpperCase()} to ${newTeamName}.`,
+    `Municipal Dispatch reassigned Incident #${(reportId || "").slice(-6).toUpperCase()} to ${newTeamName}.`,
     "task_reassigned",
     reportId
   );
@@ -708,7 +708,7 @@ export async function acceptFieldTask(
       const teamRef = doc(db, "fieldTeams", teamId);
       await updateDoc(teamRef, {
         availability: "ON_TASK",
-        lastOperationalStatus: `Accepted work order #${reportId.slice(-6).toUpperCase()}`,
+        lastOperationalStatus: `Accepted work order #${(reportId || "").slice(-6).toUpperCase()}`,
         lastUpdate: now,
         updatedAt: now
       });
@@ -723,7 +723,7 @@ export async function acceptFieldTask(
     "admin",
     "command@urbanpulse.ai",
     "Task Accepted by Field Team",
-    `${teamName} accepted work on Incident #${reportId.slice(-6).toUpperCase()}.`,
+    `${teamName} accepted work on Incident #${(reportId || "").slice(-6).toUpperCase()}.`,
     "task_assigned",
     reportId
   );
@@ -762,7 +762,7 @@ export async function requestTaskReassignment(
     "admin",
     "command@urbanpulse.ai",
     "Task Reassignment Requested",
-    `${teamName} requested reassignment for Incident #${reportId.slice(-6).toUpperCase()}: ${reason}.`,
+    `${teamName} requested reassignment for Incident #${(reportId || "").slice(-6).toUpperCase()}: ${reason}.`,
     "task_reassigned",
     reportId
   );
@@ -791,7 +791,7 @@ export async function startTravelToIncident(
 
       const teamRef = doc(db, "fieldTeams", teamId);
       await updateDoc(teamRef, {
-        lastOperationalStatus: `En route to Incident #${reportId.slice(-6).toUpperCase()}`,
+        lastOperationalStatus: `En route to Incident #${(reportId || "").slice(-6).toUpperCase()}`,
         lastUpdate: now,
         updatedAt: now
       });
@@ -838,7 +838,7 @@ export async function markArrivedOnSite(
 
       const teamRef = doc(db, "fieldTeams", teamId);
       await updateDoc(teamRef, {
-        lastOperationalStatus: `Arrived on site at Incident #${reportId.slice(-6).toUpperCase()}`,
+        lastOperationalStatus: `Arrived on site at Incident #${(reportId || "").slice(-6).toUpperCase()}`,
         lastUpdate: now,
         updatedAt: now
       });
@@ -982,7 +982,7 @@ export async function submitTaskResolution(
 
       const teamRef = doc(db, "fieldTeams", teamId);
       await updateDoc(teamRef, {
-        lastOperationalStatus: `Resolution submitted for Incident #${reportId.slice(-6).toUpperCase()}`,
+        lastOperationalStatus: `Resolution submitted for Incident #${(reportId || "").slice(-6).toUpperCase()}`,
         lastUpdate: now,
         updatedAt: now
       });
@@ -1002,7 +1002,7 @@ export async function submitTaskResolution(
     "admin",
     "command@urbanpulse.ai",
     "Resolution Submitted for Review",
-    `Field team has submitted resolution for Incident #${reportId.slice(-6).toUpperCase()}. Ready for municipal review.`,
+    `Field team has submitted resolution for Incident #${(reportId || "").slice(-6).toUpperCase()}. Ready for municipal review.`,
     "report_status",
     reportId
   );
@@ -1051,7 +1051,7 @@ export async function approveFieldResolution(
           activeTaskCount: 0,
           currentIncidentId: null,
           currentIncidentTitle: null,
-          lastOperationalStatus: `Work order #${reportId.slice(-6).toUpperCase()} completed & approved`,
+          lastOperationalStatus: `Work order #${(reportId || "").slice(-6).toUpperCase()} completed & approved`,
           lastUpdate: now,
           updatedAt: now
         });
@@ -1068,7 +1068,7 @@ export async function approveFieldResolution(
     "citizen",
     reporterEmail,
     "Hazard Resolved by City Teams",
-    `Your reported incident #${reportId.slice(-6).toUpperCase()} has been inspected, repaired, and approved by municipal officers. Thank you for making our city safer!`,
+    `Your reported incident #${(reportId || "").slice(-6).toUpperCase()} has been inspected, repaired, and approved by municipal officers. Thank you for making our city safer!`,
     "resolution_approved",
     reportId
   );
@@ -1078,7 +1078,7 @@ export async function approveFieldResolution(
     "field_team",
     "",
     "Resolution Approved",
-    `Municipal Dispatch approved your resolution for Incident #${reportId.slice(-6).toUpperCase()}. Work order closed.`,
+    `Municipal Dispatch approved your resolution for Incident #${(reportId || "").slice(-6).toUpperCase()}. Work order closed.`,
     "resolution_approved",
     reportId
   );
@@ -1139,7 +1139,7 @@ export async function rejectFieldResolution(
     "field_team",
     "",
     "Task Returned for Rework",
-    `Municipal Dispatch requested rework on Incident #${reportId.slice(-6).toUpperCase()}: ${rejectionReason}. Check notes.`,
+    `Municipal Dispatch requested rework on Incident #${(reportId || "").slice(-6).toUpperCase()}: ${rejectionReason}. Check notes.`,
     "task_returned",
     reportId
   );
@@ -1199,7 +1199,7 @@ export async function reportUnsafeCondition(
     "admin",
     "command@urbanpulse.ai",
     "⚠️ URGENT: Field Safety Alert Reported",
-    `Field team ${teamName} reported an unsafe condition at Incident #${reportId.slice(-6).toUpperCase()}: ${condition.conditionType}.`,
+    `Field team ${teamName} reported an unsafe condition at Incident #${(reportId || "").slice(-6).toUpperCase()}: ${condition.conditionType}.`,
     "safety_alert",
     reportId
   );

@@ -415,7 +415,7 @@ export default function FieldTeamDashboard({
         className: "incident-loc-icon",
         html: `
           <div class="px-2 py-1 rounded-lg text-white font-bold text-[10px] shadow-lg flex items-center gap-1 border border-white" style="background-color: ${markerColor}">
-            <span>${report.category.slice(0, 4).toUpperCase()}</span>
+            <span>${(report.category || "TASK").slice(0, 4).toUpperCase()}</span>
             ${isCritical ? '<span class="w-2 h-2 rounded-full bg-yellow-300 animate-pulse"></span>' : ''}
           </div>
         `,
@@ -1526,7 +1526,7 @@ export default function FieldTeamDashboard({
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold text-slate-400 font-mono">#{task.id.slice(-6).toUpperCase()}</span>
+                      <span className="text-[10px] font-bold text-slate-400 font-mono">#{(task.id || "").slice(-6).toUpperCase()}</span>
                       <span className="text-xs font-extrabold text-blue-600">{dist.formatted}</span>
                     </div>
                     <p className="text-xs font-bold text-slate-800 truncate mt-0.5">{task.title}</p>
@@ -1567,7 +1567,7 @@ export default function FieldTeamDashboard({
                 <option value="">-- Select Assigned Incident --</option>
                 {assignedReports.map(t => (
                   <option key={t.id} value={t.id}>
-                    [{t.id.slice(-6).toUpperCase()}] {t.title} - {t.location || "Delhi NCR"}
+                    [{(t.id || "").slice(-6).toUpperCase()}] {t.title} - {t.location || "Delhi NCR"}
                   </option>
                 ))}
               </select>
@@ -1742,7 +1742,7 @@ export default function FieldTeamDashboard({
                 <option value="">-- Select Verified Incident --</option>
                 {assignedReports.map(t => (
                   <option key={t.id} value={t.id}>
-                    [{t.id.slice(-6).toUpperCase()}] {t.title} ({t.fieldStatus || "In Progress"})
+                    [{(t.id || "").slice(-6).toUpperCase()}] {t.title} ({t.fieldStatus || "In Progress"})
                   </option>
                 ))}
               </select>
@@ -1900,7 +1900,7 @@ export default function FieldTeamDashboard({
                     }}
                     className="mt-1.5 px-3 py-1 bg-blue-50 border border-blue-200 hover:bg-blue-100 text-blue-700 text-[11px] font-bold rounded-lg flex items-center gap-1 cursor-pointer transition-colors"
                   >
-                    <span>Open Task #{msg.actionTaskId.slice(-6).toUpperCase()}</span>
+                    <span>Open Task #{(msg.actionTaskId || "").slice(-6).toUpperCase()}</span>
                     <ArrowRight className="w-3 h-3" />
                   </button>
                 )}
@@ -1987,7 +1987,7 @@ export default function FieldTeamDashboard({
                   <option value="">-- Select Incident Site --</option>
                   {assignedReports.map(t => (
                     <option key={t.id} value={t.id}>
-                      [{t.id.slice(-6).toUpperCase()}] {t.title} - {t.location || "Delhi NCR"}
+                      [{(t.id || "").slice(-6).toUpperCase()}] {t.title} - {t.location || "Delhi NCR"}
                     </option>
                   ))}
                 </select>
@@ -2229,7 +2229,7 @@ export default function FieldTeamDashboard({
               <div>
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-extrabold">
-                    #{selectedTask.id.slice(-6).toUpperCase()}
+                    #{(selectedTask.id || "").slice(-6).toUpperCase()}
                   </span>
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
                     {selectedTask.category}
@@ -2382,7 +2382,7 @@ export default function FieldTeamDashboard({
             <div>
               <h3 className="text-base font-black text-slate-900">Request Task Reassignment</h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Notify municipal dispatch why {activeTeam.name} is unable to service #{selectedTask.id.slice(-6).toUpperCase()}.
+                Notify municipal dispatch why {activeTeam.name} is unable to service #{(selectedTask.id || "").slice(-6).toUpperCase()}.
               </p>
             </div>
 

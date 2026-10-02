@@ -19,6 +19,8 @@ import { DEFAULT_FIELD_TEAMS } from "./fieldOperationsService";
 export const SEED_USERS: User[] = [
   {
     id: "user_citizen_ananya",
+    uid: "user_citizen_ananya",
+    citizenId: "CIT-ANANYA1",
     email: "ananya.citizen@urbanpulse.ai",
     fullName: "Ananya Sharma",
     role: "citizen",
@@ -32,6 +34,8 @@ export const SEED_USERS: User[] = [
   },
   {
     id: "user_citizen_rohit",
+    uid: "user_citizen_rohit",
+    citizenId: "CIT-ROHIT02",
     email: "rohit.verma@urbanpulse.ai",
     fullName: "Rohit Verma",
     role: "citizen",
@@ -45,6 +49,7 @@ export const SEED_USERS: User[] = [
   },
   {
     id: "user_muni_vikram",
+    uid: "user_muni_vikram",
     email: "vikram.malhotra@urbanpulse.gov",
     fullName: "Commissioner Vikram Malhotra",
     role: "municipal",
@@ -54,6 +59,7 @@ export const SEED_USERS: User[] = [
   },
   {
     id: "user_muni_priya",
+    uid: "user_muni_priya",
     email: "priya.nair@urbanpulse.gov",
     fullName: "Officer Priya Nair",
     role: "municipal",
@@ -63,6 +69,7 @@ export const SEED_USERS: User[] = [
   },
   {
     id: "user_field_alpha",
+    uid: "user_field_alpha",
     email: "alpha.crew@urbanpulse.ops",
     fullName: "Supervisor Vikram Singh",
     role: "field_team",
@@ -76,6 +83,7 @@ export const SEED_USERS: User[] = [
   },
   {
     id: "user_field_beta",
+    uid: "user_field_beta",
     email: "beta.crew@urbanpulse.ops",
     fullName: "Chief Electrician Rajesh Rao",
     role: "field_team",
@@ -89,6 +97,7 @@ export const SEED_USERS: User[] = [
   },
   {
     id: "user_admin_rachel",
+    uid: "user_admin_rachel",
     email: "rachel.chen@urbanpulse.gov",
     fullName: "Director Rachel Chen",
     role: "admin",
@@ -130,7 +139,7 @@ export async function getAdminUsers(): Promise<User[]> {
         phone: data.phone || data.phoneNumber || "",
         phoneNumber: data.phoneNumber || data.phone || "",
         photoURL: data.photoURL || null,
-        citizenId: data.citizenId || `CIT-${d.id.slice(0, 8).toUpperCase()}`,
+        citizenId: data.citizenId || (d.id ? `CIT-${d.id.slice(0, 8).toUpperCase()}` : undefined),
         dateOfBirth: data.dateOfBirth,
         gender: data.gender,
         address: data.address,

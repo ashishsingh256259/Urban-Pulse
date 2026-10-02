@@ -17,7 +17,7 @@ export const AdminCitizenProfileModal: React.FC<AdminCitizenProfileModalProps> =
 }) => {
   if (!user) return null;
 
-  const citizenId = user.citizenId || `CIT-${user.uid.slice(0, 8).toUpperCase()}`;
+  const citizenId = user.citizenId || (user.uid ? `CIT-${user.uid.slice(0, 8).toUpperCase()}` : (user.id ? `CIT-${user.id.slice(0, 8).toUpperCase()}` : "CIT-84729103"));
   const completion = calculateProfileCompletion(user);
   const fullName = user.fullName || user.name || user.displayName || "Citizen Member";
   const phone = user.phone || user.phoneNumber || "Not provided";

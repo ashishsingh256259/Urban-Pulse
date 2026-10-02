@@ -264,9 +264,9 @@ export async function searchLocationSuggestions(
 
   // 2. Check Active Incident Reports in Database
   for (const report of reports) {
-    if (!report.location || !report.latitude || !report.longitude) continue;
-    const locLower = report.location.toLowerCase();
-    const titleLower = report.title.toLowerCase();
+    if (!report || !report.location || !report.latitude || !report.longitude) continue;
+    const locLower = (report.location || "").toLowerCase();
+    const titleLower = (report.title || "").toLowerCase();
 
     if (
       locLower.includes(rawLower) ||
@@ -275,9 +275,9 @@ export async function searchLocationSuggestions(
       titleLower.includes(normalizedLower)
     ) {
       addResult({
-        id: `rep_${report.id}`,
+        id: `rep_${report.id || Math.random()}`,
         label: report.location,
-        subtitle: `Urban Report Area • ${report.category} (${report.title.slice(0, 38)}...)`,
+        subtitle: `Urban Report Area • ${report.category || "Incident"} (${(report.title || "Report").slice(0, 38)}...)`,
         lat: report.latitude,
         lng: report.longitude,
         type: "report"

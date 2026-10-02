@@ -250,7 +250,7 @@ export const FieldVerificationCenter: React.FC<FieldVerificationCenterProps> = (
                 <div className="p-3 bg-white rounded-xl border border-[#DDD6FE] text-xs">
                   <span className="text-[9px] font-mono text-[#64748B] uppercase block">Audit Code</span>
                   <span className="font-mono text-[#7C3AED] font-bold block mt-0.5">
-                    QA-{activeReport.id.slice(0, 8)}
+                    QA-{(activeReport.id || "").slice(0, 8)}
                   </span>
                 </div>
               </div>

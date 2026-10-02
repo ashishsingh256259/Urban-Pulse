@@ -1407,7 +1407,7 @@ export default function RoadScanner({
                 {availableVideoDevices.length === 0 && <option value="">{t("scanner.noExternalCamera", "No external dashcam found (default camera selected)")}</option>}
                 {availableVideoDevices.map(d => (
                   <option key={d.deviceId} value={d.deviceId}>
-                    {d.label || `Camera ${d.deviceId.slice(0, 8)}...`}
+                    {d.label || (d.deviceId ? `Camera ${d.deviceId.slice(0, 8)}...` : "Camera")}
                   </option>
                 ))}
               </select>

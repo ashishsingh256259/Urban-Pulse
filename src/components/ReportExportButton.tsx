@@ -122,7 +122,7 @@ export default function ReportExportButton({
         <div className="absolute right-0 mt-1.5 w-48 rounded-xl bg-white shadow-xl border border-slate-200 py-1 z-[1300] animate-in fade-in zoom-in-95 duration-100 divide-y divide-slate-100">
           <div className="px-3 py-1.5 bg-slate-50/80">
             <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-              Export Dossier #{report.id.slice(0, 8)}
+              Export Dossier #{(report.id || "").slice(0, 8)}
             </p>
           </div>
           <div className="py-1">

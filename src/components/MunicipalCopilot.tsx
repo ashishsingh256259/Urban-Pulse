@@ -127,7 +127,7 @@ export default function MunicipalCopilot({
         };
       } else if (q.includes("evidence") || q.includes("supports")) {
         const target = criticalReport || reports[0];
-        generatedReply = `### Evidence Verification Matrix\n\nAll risk ratings in UrbanPulse are grounded in empirical evidence:\n\n* **Primary Camera Ingest:** EXIF GPS-tagged photographic frame verified.\n* **Autonomous Telemetry:** AI Road Scanner dashcam model scored 96% detection confidence.\n* **Civic Corroboration:** Multi-citizen reports confirm ongoing road surface failure.\n* **Audit Code:** QA-${target?.id.slice(0, 8) || "REG-991"} validated against municipal spatial matrix.`;
+        generatedReply = `### Evidence Verification Matrix\n\nAll risk ratings in UrbanPulse are grounded in empirical evidence:\n\n* **Primary Camera Ingest:** EXIF GPS-tagged photographic frame verified.\n* **Autonomous Telemetry:** AI Road Scanner dashcam model scored 96% detection confidence.\n* **Civic Corroboration:** Multi-citizen reports confirm ongoing road surface failure.\n* **Audit Code:** QA-${(target?.id || "REG-991").slice(0, 8)} validated against municipal spatial matrix.`;
         evidenceObj = {
           location: target?.location || "Sector 62",
           reportsCount: reports.length,

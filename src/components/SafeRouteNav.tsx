@@ -25,6 +25,7 @@ interface SafeRouteNavProps {
 }
 
 const STORAGE_KEY_RECENT = "UP_RECENT_DESTINATIONS";
+const STORAGE_KEY_MAP_TYPE = "UP_SAFE_ROUTE_MAP_TYPE";
 
 export default function SafeRouteNav({ reports }: SafeRouteNavProps) {
   const { t, isHindi } = useLanguage();
@@ -32,6 +33,8 @@ export default function SafeRouteNav({ reports }: SafeRouteNavProps) {
   // Map references
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
+  const tileLayerRef = useRef<L.TileLayer | null>(null);
+  const labelsLayerRef = useRef<L.TileLayer | null>(null);
   const routeLayersRef = useRef<{ [routeId: string]: L.Polyline }>({});
   const originMarkerRef = useRef<L.Marker | null>(null);
   const destMarkerRef = useRef<L.Marker | null>(null);
@@ -40,6 +43,16 @@ export default function SafeRouteNav({ reports }: SafeRouteNavProps) {
   const zoneLayersRef = useRef<L.Layer[]>([]);
   const watchIdRef = useRef<number | null>(null);
   const lastCenteredCoordRef = useRef<[number, number] | null>(null);
+
+  // Map basemap type: Road (default) vs Satellite
+  const [mapType, setMapType] = useState<"road" | "satellite">(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_MAP_TYPE);
+      if (saved === "satellite" || saved === "road") return saved;
+    } catch {}
+    return "road";
+  });
+  const [mapReady, setMapReady] = useState(false);
 
   // Origin & Destination State
   const [originStr, setOriginStr] = useState("My Current Location");
@@ -136,24 +149,72 @@ export default function SafeRouteNav({ reports }: SafeRouteNavProps) {
       zoomControl: false
     });
 
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-    }).addTo(map);
-
     L.control.zoom({ position: "bottomright" }).addTo(map);
     mapInstanceRef.current = map;
+    setMapReady(true);
 
     // Trigger initial geolocation check
     requestCurrentLocation();
 
     return () => {
+      setMapReady(false);
       if (mapInstanceRef.current) {
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
       }
     };
   }, []);
+
+  // 1b. Manage Dynamic Basemap Layer (Road vs Satellite)
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map || !mapReady) return;
+
+    // Clean up existing basemap layer
+    if (tileLayerRef.current) {
+      map.removeLayer(tileLayerRef.current);
+      tileLayerRef.current = null;
+    }
+    // Clean up existing labels layer
+    if (labelsLayerRef.current) {
+      map.removeLayer(labelsLayerRef.current);
+      labelsLayerRef.current = null;
+    }
+
+    if (mapType === "road") {
+      const roadLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+      });
+      roadLayer.addTo(map);
+      roadLayer.bringToBack();
+      tileLayerRef.current = roadLayer;
+    } else {
+      const satUrl = (import.meta as any).env?.VITE_SATELLITE_TILE_URL || "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+      const satLayer = L.tileLayer(satUrl, {
+        maxZoom: 19,
+        attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+      });
+      satLayer.addTo(map);
+      satLayer.bringToBack();
+      tileLayerRef.current = satLayer;
+
+      // Add high-resolution reference labels overlay for roads & landmarks on top of satellite
+      const labelsLayer = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", {
+        maxZoom: 19
+      });
+      labelsLayer.addTo(map);
+      labelsLayerRef.current = labelsLayer;
+    }
+  }, [mapType, mapReady]);
+
+  // Map layer toggle handler
+  const handleToggleMapType = (type: "road" | "satellite") => {
+    setMapType(type);
+    try {
+      localStorage.setItem(STORAGE_KEY_MAP_TYPE, type);
+    } catch {}
+  };
 
   // 2. Geolocation Request
   const requestCurrentLocation = () => {
@@ -1192,11 +1253,47 @@ export default function SafeRouteNav({ reports }: SafeRouteNavProps) {
           <div className="relative bg-slate-950 border border-slate-800 rounded-3xl overflow-hidden shadow-md">
             
             {/* Map Top Telemetry Bar */}
-            <div className="p-3 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 flex items-center justify-between text-xs text-white z-10 relative">
+            <div className="p-2.5 sm:p-3 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs text-white z-10 relative">
               <div className="flex items-center gap-2">
                 <Compass className="w-4 h-4 text-indigo-400" />
                 <span className="font-mono font-bold text-slate-200">URBANPULSE GIS TELEMETRY</span>
               </div>
+
+              {/* Map View Switcher in Bar */}
+              <div className="flex items-center gap-1 bg-slate-950/80 p-0.5 rounded-xl border border-slate-700/80">
+                <span className="text-[9px] font-mono font-black text-slate-400 uppercase px-1.5 hidden md:inline">
+                  MAP VIEW:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleToggleMapType("road")}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold font-mono transition flex items-center gap-1.5 cursor-pointer ${
+                    mapType === "road"
+                      ? "bg-indigo-600 text-white shadow-xs"
+                      : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
+                  }`}
+                  aria-pressed={mapType === "road"}
+                  title="Switch to Road Basemap"
+                >
+                  <span>🗺</span>
+                  <span>Road</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleToggleMapType("satellite")}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold font-mono transition flex items-center gap-1.5 cursor-pointer ${
+                    mapType === "satellite"
+                      ? "bg-indigo-600 text-white shadow-xs"
+                      : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
+                  }`}
+                  aria-pressed={mapType === "satellite"}
+                  title="Switch to Satellite Basemap"
+                >
+                  <span>🛰</span>
+                  <span>Satellite</span>
+                </button>
+              </div>
+
               <div className="flex items-center gap-3 font-mono text-[10.5px]">
                 <span className="text-slate-400 flex items-center gap-1">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
@@ -1204,6 +1301,43 @@ export default function SafeRouteNav({ reports }: SafeRouteNavProps) {
                 </span>
               </div>
             </div>
+
+            {/* FLOATING ON-MAP MAP VIEW SWITCHER (Road / Satellite) */}
+            {!isNavigating && (
+              <div className="absolute top-14 left-3 z-10 bg-slate-900/90 backdrop-blur-md border border-slate-700/80 rounded-xl p-1 shadow-xl flex items-center gap-1">
+                <span className="text-[9px] font-mono font-black text-slate-400 uppercase px-1.5 hidden sm:inline tracking-wider">
+                  MAP VIEW
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleToggleMapType("road")}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold font-mono transition flex items-center gap-1.5 cursor-pointer ${
+                    mapType === "road"
+                      ? "bg-indigo-600 text-white shadow-xs"
+                      : "text-slate-300 hover:text-white hover:bg-slate-800/80"
+                  }`}
+                  aria-pressed={mapType === "road"}
+                  title="Switch to Road Basemap"
+                >
+                  <span>🗺</span>
+                  <span>Road</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleToggleMapType("satellite")}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold font-mono transition flex items-center gap-1.5 cursor-pointer ${
+                    mapType === "satellite"
+                      ? "bg-indigo-600 text-white shadow-xs"
+                      : "text-slate-300 hover:text-white hover:bg-slate-800/80"
+                  }`}
+                  aria-pressed={mapType === "satellite"}
+                  title="Switch to Satellite Basemap"
+                >
+                  <span>🛰</span>
+                  <span>Satellite</span>
+                </button>
+              </div>
+            )}
 
             {/* LIVE ACTIVE NAVIGATION HUD */}
             {isNavigating && currentRoute && (
@@ -1235,6 +1369,36 @@ export default function SafeRouteNav({ reports }: SafeRouteNavProps) {
                   </div>
 
                   <div className="flex items-center gap-2">
+                    {/* Compact Map Switcher inside Navigation HUD */}
+                    <div className="flex items-center bg-slate-950/80 p-0.5 rounded-lg border border-slate-700/80">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleMapType("road")}
+                        className={`px-2 py-1 rounded text-[11px] font-bold font-mono transition flex items-center gap-1 cursor-pointer ${
+                          mapType === "road"
+                            ? "bg-indigo-600 text-white shadow-xs"
+                            : "text-slate-400 hover:text-slate-200"
+                        }`}
+                        title="Switch to Road Basemap"
+                      >
+                        <span>🗺</span>
+                        <span className="hidden sm:inline">Road</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleMapType("satellite")}
+                        className={`px-2 py-1 rounded text-[11px] font-bold font-mono transition flex items-center gap-1 cursor-pointer ${
+                          mapType === "satellite"
+                            ? "bg-indigo-600 text-white shadow-xs"
+                            : "text-slate-400 hover:text-slate-200"
+                        }`}
+                        title="Switch to Satellite Basemap"
+                      >
+                        <span>🛰</span>
+                        <span className="hidden sm:inline">Satellite</span>
+                      </button>
+                    </div>
+
                     <button
                       onClick={handleCenterOnMe}
                       title="Center map on current GPS location"
@@ -1324,6 +1488,9 @@ export default function SafeRouteNav({ reports }: SafeRouteNavProps) {
               <span className="flex items-center gap-1"><span className="text-amber-400 font-bold">⚠</span> Hazard</span>
               <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-500/50 border border-orange-500 inline-block"></span> High-Risk Zone</span>
               <span className="flex items-center gap-1"><span className="w-3.5 h-1 bg-emerald-500 rounded inline-block"></span> Safe Segment</span>
+              <span className="flex items-center gap-1 text-slate-400 border-l border-slate-700 pl-2">
+                <span>Layer: {mapType === "satellite" ? "🛰 Satellite" : "🗺 Road"}</span>
+              </span>
             </div>
           </div>
 

@@ -83,7 +83,8 @@ export function exportRejectedIncidentsCSV(
 
   for (let index = 0; index < rejectedItems.length; index++) {
     const item = rejectedItems[index];
-    const auditRecordId = `AUDIT-REJ-${item.id.replace(/[^a-zA-Z0-9_-]/g, "")}-${String(index + 1).padStart(3, "0")}`;
+    const isRejected = item.status === "REJECTED";
+    const auditRecordId = `AUDIT-${isRejected ? "REJ" : "DUP"}-${item.id.replace(/[^a-zA-Z0-9_-]/g, "")}-${String(index + 1).padStart(3, "0")}`;
     const rejected = auditTimestamp(item.rejectedAt);
     const created = auditTimestamp(item.createdAt);
 
@@ -93,8 +94,8 @@ export function exportRejectedIncidentsCSV(
       item.title || "Untitled Incident",
       item.category || "General",
       item.issueType || item.category || "General Issue",
-      item.status || "REJECTED",
-      "Duplicate Submission - Consolidated for Operational Queuing",
+      item.status || "N/A",
+      isRejected ? "Duplicate Submission - Rejected" : "Duplicate Submission Register",
       item.rejectionReason || "N/A",
       item.rejectionNote || "N/A",
       rejected.iso,

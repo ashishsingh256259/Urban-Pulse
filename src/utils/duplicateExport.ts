@@ -1,5 +1,5 @@
-import { Report } from "../types";
-import { DuplicateGroup } from "./duplicateDetection";
+import type { Report } from "../types";
+import type { DuplicateGroup } from "./duplicateDetection";
 
 /**
  * Escapes a cell value according to RFC 4180 CSV specifications.
@@ -9,6 +9,17 @@ function escapeCsvCell(value: any): string {
   const str = String(value);
   const escaped = str.replace(/"/g, '""');
   return `"${escaped}"`;
+}
+
+function auditTimestamp(value?: string) {
+  const date = value ? new Date(value) : undefined;
+  if (!date || Number.isNaN(date.getTime())) {
+    return { iso: "N/A", local: "N/A" };
+  }
+  return {
+    iso: date.toISOString(),
+    local: date.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })
+  };
 }
 
 export interface RejectedAuditItem extends Omit<Partial<Report>, "status"> {
@@ -73,9 +84,8 @@ export function exportRejectedIncidentsCSV(
   for (let index = 0; index < rejectedItems.length; index++) {
     const item = rejectedItems[index];
     const auditRecordId = `AUDIT-REJ-${item.id.replace(/[^a-zA-Z0-9_-]/g, "")}-${String(index + 1).padStart(3, "0")}`;
-    const rejectedAtIso = item.rejectedAt || item.updatedAt || new Date().toISOString();
-    const rejectedAtLocal = rejectedAtIso ? new Date(rejectedAtIso).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "N/A";
-    const createdAtLocal = item.createdAt ? new Date(item.createdAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "N/A";
+    const rejected = auditTimestamp(item.rejectedAt);
+    const created = auditTimestamp(item.createdAt);
 
     const row = [
       auditRecordId,
@@ -85,12 +95,12 @@ export function exportRejectedIncidentsCSV(
       item.issueType || item.category || "General Issue",
       item.status || "REJECTED",
       "Duplicate Submission - Consolidated for Operational Queuing",
-      item.rejectionReason || "Duplicate report consolidated into primary incident",
-      item.rejectionNote || `Consolidated into primary incident #${item.primaryReportId || item.duplicateOfReportId || "N/A"} to de-clutter municipal queue while preserving citizen evidence for audit.`,
-      rejectedAtIso,
-      rejectedAtLocal,
-      item.rejectedBy || "Municipal Administrator",
-      item.rejectedByRole || "admin",
+      item.rejectionReason || "N/A",
+      item.rejectionNote || "N/A",
+      rejected.iso,
+      rejected.local,
+      item.rejectedBy || "N/A",
+      item.rejectedByRole || "N/A",
       item.primaryReportId || item.duplicateOfReportId || "N/A",
       item.primaryReportTitle || "Primary Incident Record",
       item.primaryReportStatus || "Active Incident",
@@ -101,8 +111,8 @@ export function exportRejectedIncidentsCSV(
       item.location || item.primaryReportLocation || "City Jurisdiction",
       item.latitude ?? "N/A",
       item.longitude ?? "N/A",
-      item.createdAt || "N/A",
-      createdAtLocal,
+      created.iso,
+      created.local,
       item.reporterName || "Citizen Reporter",
       item.reporterEmail || "Not Disclosed",
       item.description || "No description provided",
